@@ -520,6 +520,7 @@ body{background:radial-gradient(900px 420px at 10% -140px,rgba(34,211,107,.20),t
 .formgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 .formgrid .btn{padding:0 4px;font-size:14px;min-height:38px}
 .formgrid .wand{grid-column:1/-1;gap:6px}
+.lu-ic{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background:rgba(34,211,107,.12);color:var(--accent);flex:none}
 
 </style>
 </head><body><div id="app"></div>
@@ -661,9 +662,29 @@ function bestLineupFor(players, formation) {
   return { formation, field, bench, value };
 }
 const SQUAD = 24, STARTERS = 11;
+/* Arma una alineación a partir de una preferida (predeterminada del equipo o del partido anterior): los que faltan se reemplazan por el mejor disponible */
+function fromPref(players, pref) {
+  const ok = new Set(players.map(p => p.id));
+  const field = FORMATIONS[pref.formation].map((slot, i) => ({ slot, pid: pref.field[i] && ok.has(pref.field[i]) ? pref.field[i] : null }));
+  const used = new Set(field.map(f => f.pid).filter(Boolean));
+  const benchPref = (pref.bench || []).filter(id => ok.has(id) && !used.has(id));
+  const repl = {};
+  field.forEach((f, i) => {
+    if (f.pid) return;
+    const orig = pref.field[i] || null;
+    const cands = players.filter(p => !used.has(p.id));
+    const best = cands.length ? cands.reduce((a, b) => (effSkill(b, f.slot) > effSkill(a, f.slot) ? b : a)) : null;
+    if (best) { f.pid = best.id; used.add(best.id); }
+    if (orig) repl[i] = { orig, fill: best ? best.id : null };
+  });
+  const bench = [...benchPref.filter(id => !used.has(id)), ...players.filter(p => !used.has(p.id) && !benchPref.includes(p.id)).map(p => p.id)];
+  return { L: { formation: pref.formation, field, bench }, repl };
+}
+const validPref = l => !!(l && FORMATIONS[l.formation] && Array.isArray(l.field));
 function autoLineup(team) {
   const players = (team.players || []).slice(0, SQUAD);
-  // formación predeterminada del equipo (si tiene una)
+  // alineación predeterminada del equipo (si tiene una)
+  if (validPref(team.lineup) && players.length) return fromPref(players, team.lineup).L;
   if (team.formation && FORMATIONS[team.formation]) return bestLineupFor(players, team.formation);
   let best = null;
   for (const f of Object.keys(FORMATIONS)) {
@@ -1478,7 +1499,7 @@ function createLeague(name, type, teamIds) {
 function migrateLeague(lg) {
   // temporada ya cerrada pero aún sin registro por jugadora: se completa con los partidos que siguen guardados
   if (lg.history && lg.history.length) { const h = lg.history[lg.history.length - 1]; if (!h.players && h.n === lg.season && lg.fixtures.some(f => f.res)) h.players = seasonPlayers(lg.fixtures); } if (lg.type === 'po' && !lg.hbal) { balanceHome(lg.fixtures || []); lg.hbal = 1; } if (!lg.season) lg.season = 1; if (!lg.history) lg.history = []; if (!lg.out) lg.out = {}; (lg.fixtures || []).forEach(f => f.res && f.res.lines.forEach(l => { l.pos = normPos(l.pos); })); }
-function migrateTeams() { DATA.teams.forEach(t => { t.players.forEach(p => { p.pos = normPos(p.pos); }); if (t.flag && typeof document !== 'undefined') { const c = flagColors(t.flag); if (c) t.logo = Object.assign({}, t.logo, { c1: c[0], c2: c[1] }); } if (t.formation && !FORMATIONS[t.formation]) delete t.formation; }); }
+function migrateTeams() { DATA.teams.forEach(t => { t.players.forEach(p => { p.pos = normPos(p.pos); }); if (t.flag && typeof document !== 'undefined') { const c = flagColors(t.flag); if (c) t.logo = Object.assign({}, t.logo, { c1: c[0], c2: c[1] }); } if (t.formation) { if (FORMATIONS[t.formation] && !t.lineup && t.players.length) { const L = bestLineupFor(t.players, t.formation); t.lineup = { formation: L.formation, field: L.field.map(f => f.pid), bench: L.bench }; } delete t.formation; } if (t.lineup && !validPref(t.lineup)) delete t.lineup; }); }
 function teamSnap(id) { const t = teamById(id); return t ? { id, name: t.name, abbr: t.abbr, logo: t.logo } : { id, name: '—', abbr: '—' }; }
 function runnerUpId(lg) {
   if (!lg.champion) return null;
@@ -1533,25 +1554,11 @@ const YC_LIMIT = 4;
 function ycCount(l) { return l.rc > 0 && l.yc >= 2 ? 0 : (l.yc || 0); }
 /* Alineación guardada por equipo dentro de la liga */
 function restoreLineup(lg, team) {
-  const pref = lg.lineups && lg.lineups[team.id];
-  if (!pref || !FORMATIONS[pref.formation]) return null;
-  // si el equipo tiene formación predeterminada, la alineación guardada solo vale si usa esa formación
-  if (team.formation && FORMATIONS[team.formation] && pref.formation !== team.formation) return null;
-  const avail = availablePlayers(lg, team); const ok = new Set(avail.map(p => p.id));
-  const field = FORMATIONS[pref.formation].map((slot, i) => ({ slot, pid: pref.field[i] && ok.has(pref.field[i]) ? pref.field[i] : null }));
-  const used = new Set(field.map(f => f.pid).filter(Boolean));
-  const benchPref = (pref.bench || []).filter(id => ok.has(id) && !used.has(id));
-  const repl = {};
-  field.forEach((f, i) => {
-    if (f.pid) return;
-    const orig = pref.field[i] || null;
-    const cands = avail.filter(p => !used.has(p.id));
-    const best = cands.length ? cands.reduce((a, b) => (effSkill(b, f.slot) > effSkill(a, f.slot) ? b : a)) : null;
-    if (best) { f.pid = best.id; used.add(best.id); }
-    if (orig) repl[i] = { orig, fill: best ? best.id : null };
-  });
-  const bench = [...benchPref.filter(id => !used.has(id)), ...avail.filter(p => !used.has(p.id) && !benchPref.includes(p.id)).map(p => p.id)];
-  return { L: { formation: pref.formation, field, bench }, repl };
+  // la alineación predeterminada del equipo manda; si no tiene, se usa la del partido anterior en esta liga
+  const own = validPref(team.lineup);
+  const pref = own ? team.lineup : lg.lineups && lg.lineups[team.id];
+  if (!validPref(pref)) return null;
+  const r = fromPref(availablePlayers(lg, team), pref); r.src = own ? 'team' : 'last'; return r;
 }
 function saveLineup(lg, team, L, repl) {
   lg.lineups = lg.lineups || {};
@@ -1713,7 +1720,7 @@ function playerLeagueData(lg, pid) {
   return { pl, team, cur: now, curTM: now ? (cur ? curTeamMatches : now.tm) : curTeamMatches, seasons, tot, name: pl ? pl.name : last ? last.name : '?' };
 }
 
-const APP_VER = '1.4.0';
+const APP_VER = '1.5.0';
 /* ===== Interfaz: navegación y pantallas ===== */
 const NAV = { stack: [], guard: null };
 const app = () => $('#app');
@@ -2154,7 +2161,7 @@ SCREENS.team = {
       <div class="grid2" style="grid-template-columns:1fr 110px"><div class="field"><label for="tn">Nombre</label><input class="inp" id="tn" maxlength="30" value="${esc(d.name)}" placeholder="Ej: Club Andino"></div>
       <div class="field"><label for="ta">Abreviatura</label><input class="inp" id="ta" maxlength="3" value="${esc(d.abbr)}" placeholder="AND" style="text-transform:uppercase"></div></div>
       <div class="field"><span class="flabel">Bandera</span><button class="row flagbtn" id="pickFlag" type="button">${d.flag ? `<span class="flagi" style="width:40px;height:40px;font-size:32px">${flagEmoji(d.flag)}</span><div class="grow"><div class="t1">${esc(flagName(d.flag))}</div><div class="t2">Toca para cambiarla</div></div>` : `<span class="flagi" style="width:40px;height:40px;font-size:32px;opacity:.5">${flagEmoji(null)}</span><div class="grow"><div class="t1">Elegir bandera</div><div class="t2">Será el ícono del equipo</div></div>`}${IC.chev}</button></div>
-      <div class="field"><span class="flabel">Formación predeterminada</span><div class="formseg">${['', ...Object.keys(FORMATIONS)].map(k => `<button class="${(d.formation || '') === k ? 'on' : ''}" data-dform="${k}">${k ? `<b>${k}</b><small>${FORM_MOD[k].name}</small>` : `<b>Auto</b><small>La mejor</small>`}</button>`).join('')}</div><span class="muted" style="font-size:13px">${d.formation ? `Cada partido parte en ${d.formation}. En la previa del partido la puedes cambiar igual.` : 'Cada partido usa la formación que mejor calce con los jugadores disponibles.'}</span></div>
+      <div class="field"><span class="flabel">Alineación predeterminada</span><button class="row flagbtn" id="editLineup" type="button"><span class="lu-ic">${IC.shirt.replace('<svg', '<svg width="24" height="24"')}</span><div class="grow"><div class="t1">${validPref(d.lineup) ? `${d.lineup.formation} · ${FORM_MOD[d.lineup.formation].name}` : 'Automática'}</div><div class="t2">${validPref(d.lineup) ? 'Titulares y suplentes fijos. Si falta alguien, entra el mejor disponible' : 'Cada partido se arma la mejor alineación posible'}</div></div>${IC.chev}</button></div>
       <div class="field"><label for="ts">Sinergia del equipo</label><div class="rangewrap"><input type="range" id="ts" min="1" max="100" value="${d.skill}"><output id="tso" class="num">${d.skill}</output></div><span class="muted" style="font-size:13px">Qué tan bien juegan juntos. Multiplica el rendimiento de todo el equipo.</span></div>
       <div class="sec-t"><h2>Plantilla</h2><span class="muted num">${d.players.length}/${SQUAD}</span></div>
       <div class="card list">${plRows}${d.players.length < SQUAD ? `<button class="row" id="addPl" style="color:var(--accent);font-weight:700;justify-content:center">${IC.plus.replace('<svg', '<svg width="20" height="20"')} Añadir jugador</button>` : ''}</div>
@@ -2173,7 +2180,7 @@ SCREENS.team = {
     const ts = $('#ts'); rangeStyle(ts); ts.oninput = () => { d.skill = +ts.value; $('#tso').textContent = ts.value; rangeStyle(ts); dirty(); };
     const rerender = () => { p._scroll = scrollY; render(); };
     $('#pickFlag').onclick = () => flagPicker(d.flag, code => { d.flag = code; const c = flagColors(code); if (c) { d.logo.c1 = c[0]; d.logo.c2 = c[1]; } dirty(); rerender(); });
-    app().querySelectorAll('[data-dform]').forEach(b => b.onclick = () => { if (b.dataset.dform) d.formation = b.dataset.dform; else delete d.formation; dirty(); rerender(); });
+    $('#editLineup').onclick = () => { p._scroll = scrollY; go('lineupEdit', { draft: d, owner: p }); };
     app().querySelectorAll('[data-pl]').forEach(b => b.onclick = () => playerSheet(p, d.players.find(x => x.id === b.dataset.pl)));
     const add = $('#addPl'); if (add) add.onclick = () => {
       const used = new Set(d.players.map(x => x.num)); let n = 1; while (used.has(n)) n++;
@@ -2196,6 +2203,59 @@ SCREENS.team = {
       if (i >= 0) { const old = DATA.teams[i]; old.players.forEach(pl => { if (pl.photo && !d.players.some(x => x.photo === pl.photo)) delPhoto(pl.photo); }); DATA.teams[i] = d; } else DATA.teams.push(d);
       save(); p.dirty = false; NAV.guard = null; toast('Equipo guardado'); back();
     };
+  },
+};
+/* ---------- ALINEACIÓN PREDETERMINADA DEL EQUIPO ---------- */
+SCREENS.lineupEdit = {
+  html(p) {
+    const d = p.draft; if (!d) return '';
+    const emptyL = f => ({ formation: f, field: FORMATIONS[f].map(sl => ({ pid: null, slot: sl })), bench: d.players.map(x => x.id) });
+    if (!p.L) p.L = validPref(d.lineup) ? fromPref(d.players, d.lineup).L : (d.players.length ? autoLineup(Object.assign({}, d, { lineup: null })) : emptyL('4-4-2'));
+    const L = p.L; const xy = FORM_XY[L.formation]; const pl = id => d.players.find(x => x.id === id);
+    const slots = L.field.map((s, i) => {
+      const P = pl(s.pid); const [x, y] = xy[i]; const sel = p.sel && p.sel.k === 'f' && p.sel.i === i;
+      if (!P) return `<button class="slot ${sel ? 'sel' : ''}" data-f="${i}" style="left:${x}%;top:${y}%"><span class="av" style="width:42px;height:42px;border:2.5px dashed #fff;background:rgba(0,0,0,.3)">?</span><span class="nm">Vacío</span><span class="tag warn">${s.slot}</span></button>`;
+      const pen = posPenalty(P.pos, s.slot);
+      return `<button class="slot ${sel ? 'sel' : ''}" data-f="${i}" style="left:${x}%;top:${y}%">${avatar(P, 42, d)}<span class="nm">${esc(lastName(P.name))}</span><span class="tag ${pen ? 'warn' : ''}">${s.slot} · ${effSkill(P, s.slot)}${pen ? ' (−' + pen + ')' : ''}</span></button>`;
+    }).join('');
+    const bench = L.bench.map((id, j) => { const P = pl(id); if (!P) return ''; const sel = p.sel && p.sel.k === 'b' && p.sel.i === j; return `<button class="benchp ${sel ? 'sel' : ''}" data-b="${j}">${avatar(P, 40, d)}<div style="min-width:0"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(P.name)}</div><div class="muted" style="font-size:12px">${POS_SHORT[P.pos]} · ${P.skill}</div></div></button>`; }).join('');
+    const S = lineupStrength(d, L); const fm = FORM_MOD[L.formation];
+    const bar = (l, v) => `<div class="bar3"><div class="l"><span>${l}</span><b class="num" style="color:var(--text)">${v}</b></div><div class="b"><i style="width:${v}%"></i></div></div>`;
+    const pitchLines = `<svg class="lines" viewBox="0 0 100 120" preserveAspectRatio="none" fill="none" stroke="rgba(255,255,255,.5)" stroke-width=".6"><rect x="3" y="3" width="94" height="114"/><line x1="3" y1="60" x2="97" y2="60"/><circle cx="50" cy="60" r="11"/><rect x="26" y="3" width="48" height="17"/><rect x="26" y="100" width="48" height="17"/><rect x="40" y="0.5" width="20" height="2.5"/><rect x="40" y="117" width="20" height="2.5"/></svg>`;
+    return `${topbar('Alineación · ' + esc(d.abbr || d.name || 'Equipo'))}<main class="content notab">
+      <div class="formgrid">${Object.keys(FORMATIONS).map(k => `<button class="btn sm ${L.formation === k ? 'blue' : 'ghost'}" data-form="${k}">${k}</button>`).join('')}<button class="btn sm ghost wand" id="bestL">${IC.wand.replace('<svg', '<svg width="18" height="18"')} Mejor alineación en ${L.formation}</button></div>
+      <div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:6px"><b class="disp up" style="font-size:18px;letter-spacing:.05em">${fm.name}</b><div class="muted" style="font-size:13px">${fm.desc}.</div><div style="font-size:12px;display:flex;gap:12px;flex-wrap:wrap"><span style="color:var(--good)">▲ Gana a ${(FORM_BEATS[L.formation] || []).join(' y ')}</span><span style="color:var(--rc)">▼ Sufre ante ${Object.keys(FORM_BEATS).filter(k => beatsF(k, L.formation)).join(' y ')}</span></div></div>
+      <div class="pitch">${pitchLines}${slots}</div>
+      <p class="muted" style="margin:-4px 0 0;font-size:13px;text-align:center">${p.sel ? 'Ahora toca a otro jugador para intercambiarlos' : 'Toca dos jugadores para intercambiarlos'}</p>
+      <div class="sec-t"><h2>Suplentes</h2><span class="muted num">${L.bench.length}</span></div>
+      <div class="bench">${bench || '<span class="muted">Sin suplentes</span>'}</div>
+      <div class="card" style="padding:14px"><div class="bars3">${bar('Ataque', S.att)}${bar('Medio', S.mid)}${bar('Defensa', S.def)}</div></div>
+      <div class="card" style="padding:14px;display:flex;flex-direction:column;gap:8px"><div class="muted" style="font-size:13px">Si un titular está lesionado o suspendido, entra el mejor disponible para su puesto. En la previa de cada partido puedes cambiar lo que quieras solo para ese partido.</div>${validPref(d.lineup) ? '<button class="btn ghost block" id="clearL">Quitar predeterminada (volver a automática)</button>' : ''}</div>
+    </main><div class="bottomcta"><button class="btn pri block" id="saveL">Guardar alineación</button></div>`;
+  },
+  after(p) {
+    const d = p.draft; if (!d) { back(); return; }
+    const rr = () => { p._scroll = scrollY; render(); };
+    app().querySelectorAll('[data-form]').forEach(b => b.onclick = () => { p.L = bestLineupFor(d.players, b.dataset.form) || p.L; p.sel = null; rr(); });
+    $('#bestL').onclick = () => { p.L = bestLineupFor(d.players, p.L.formation) || p.L; p.sel = null; rr(); toast('Mejor alineación'); };
+    const tap = (k, i) => {
+      const L = p.L;
+      if (!p.sel) { p.sel = { k, i }; rr(); return; }
+      const a = p.sel, b = { k, i }; p.sel = null;
+      if (a.k === b.k && a.i === b.i) { rr(); return; }
+      const get = s => s.k === 'f' ? L.field[s.i].pid : L.bench[s.i];
+      const put = (s, v) => { if (s.k === 'f') L.field[s.i].pid = v; else L.bench[s.i] = v; };
+      const va = get(a), vb = get(b); put(a, vb); put(b, va);
+      L.bench = L.bench.filter(Boolean); rr();
+    };
+    app().querySelectorAll('[data-f]').forEach(b => b.onclick = () => tap('f', +b.dataset.f));
+    app().querySelectorAll('[data-b]').forEach(b => b.onclick = () => tap('b', +b.dataset.b));
+    $('#saveL').onclick = () => {
+      if (!p.L.field.some(f => f.pid)) { toast('Agrega jugadores al equipo primero'); return; }
+      d.lineup = { formation: p.L.formation, field: p.L.field.map(f => f.pid), bench: p.L.bench.slice() };
+      if (p.owner) p.owner.dirty = true; toast('Alineación lista · recuerda guardar el equipo'); back();
+    };
+    const cl = $('#clearL'); if (cl) cl.onclick = () => { delete d.lineup; if (p.owner) p.owner.dirty = true; toast('Alineación automática'); back(); };
   },
 };
 function flagPicker(cur, onPick) {
@@ -2368,7 +2428,7 @@ SCREENS.prematch = {
       p.repl = [{}, {}]; p.saved = [false, false];
       p.lineups = avail.map((t, k) => {
         const r = restoreLineup(lg, T[k]);
-        if (r) { p.repl[k] = r.repl; p.saved[k] = true; return r.L; }
+        if (r) { p.repl[k] = r.repl; p.saved[k] = r.src; return r.L; }
         return autoLineup(t) || { formation: '4-4-2', field: FORMATIONS['4-4-2'].map(sl => ({ pid: null, slot: sl })), bench: [] };
       });
       p.side = 0; p.sel = null;
@@ -2397,7 +2457,7 @@ SCREENS.prematch = {
         const st = beatsF(L.formation, rivalF) ? '<span class="chip" style="background:rgba(53,208,127,.15);color:var(--good)">Ventaja táctica</span>' : beatsF(rivalF, L.formation) ? '<span class="chip" style="background:rgba(255,77,94,.15);color:var(--rc)">Desventaja táctica</span>' : '';
         const nm = id => { const x = team.players.find(q => q.id === id); return x ? esc(x.name) : '—'; };
         const rp = Object.values(p.repl[side] || {}).filter(r => r.orig);
-        const savedInfo = p.saved[side] ? `<div style="font-size:12px;color:var(--accent2);display:flex;flex-direction:column;gap:3px;border-top:1px solid var(--line);padding-top:8px;margin-top:2px"><span>↺ Alineación guardada del partido anterior</span>${rp.map(r => `<span style="color:var(--mid)">Baja de ${nm(r.orig)}${lg.out && lg.out[r.orig] ? ' (' + (lg.out[r.orig].type === 'susp' ? 'suspendido' : 'lesionado') + ')' : ''} → ${r.fill ? 'entra ' + nm(r.fill) : 'puesto vacío'}</span>`).join('')}</div>` : '';
+        const savedInfo = p.saved[side] ? `<div style="font-size:12px;color:var(--accent2);display:flex;flex-direction:column;gap:3px;border-top:1px solid var(--line);padding-top:8px;margin-top:2px"><span>${p.saved[side] === 'team' ? '★ Alineación predeterminada del equipo' : '↺ Alineación guardada del partido anterior'}</span>${rp.map(r => `<span style="color:var(--mid)">Baja de ${nm(r.orig)}${lg.out && lg.out[r.orig] ? ' (' + (lg.out[r.orig].type === 'susp' ? 'suspendido' : 'lesionado') + ')' : ''} → ${r.fill ? 'entra ' + nm(r.fill) : 'puesto vacío'}</span>`).join('')}</div>` : '';
         return `<div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:6px"><div style="display:flex;align-items:center;gap:8px;justify-content:space-between"><b class="disp up" style="font-size:18px;letter-spacing:.05em">${fm.name}</b>${st}</div><div class="muted" style="font-size:13px">${fm.desc}.</div><div style="font-size:12px;display:flex;gap:12px;flex-wrap:wrap">${beats ? `<span style="color:var(--good)">▲ Gana a ${beats}</span>` : ''}${loses ? `<span style="color:var(--rc)">▼ Sufre ante ${loses}</span>` : ''}<span class="muted">Rival: ${rivalF}</span></div>${savedInfo}</div>`; })()}
       <div class="pitch">${pitchLines}${slots}</div>
       <p class="muted" style="margin:-4px 0 0;font-size:13px;text-align:center">${p.sel ? 'Ahora toca a otro jugador para intercambiarlos' : 'Toca dos jugadores para intercambiarlos'}</p>
@@ -2416,7 +2476,7 @@ SCREENS.prematch = {
     app().querySelectorAll('[data-form]').forEach(b => b.onclick = () => { p.lineups[p.side] = lineupFor(availT(p.side), b.dataset.form) || emptyL(b.dataset.form); p.repl[p.side] = {}; p.saved[p.side] = false; p.sel = null; rr(); });
     const availT = k => Object.assign({}, T[k], { players: availablePlayers(lg, T[k]) });
     const emptyL = f => ({ formation: f, field: FORMATIONS[f].map(sl => ({ pid: null, slot: sl })), bench: [] });
-    $('#autoL').onclick = () => { p.lineups[p.side] = autoLineup(availT(p.side)) || emptyL('4-4-2'); p.repl[p.side] = {}; p.saved[p.side] = false; p.sel = null; rr(); toast('Alineación automática'); };
+    $('#autoL').onclick = () => { p.lineups[p.side] = autoLineup(Object.assign(availT(p.side), { lineup: null, formation: null })) || emptyL('4-4-2'); p.repl[p.side] = {}; p.saved[p.side] = false; p.sel = null; rr(); toast('Alineación automática'); };
     const tap = (k, i) => {
       const L = p.lineups[p.side];
       if (!p.sel) { p.sel = { k, i }; rr(); return; }
