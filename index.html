@@ -508,6 +508,9 @@ body{background:radial-gradient(900px 420px at 10% -140px,rgba(34,211,107,.20),t
 .flagopt{display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:12px;text-align:left}
 .flagopt.on{background:rgba(34,211,107,.15);outline:1px solid var(--accent)}
 .flagopt .fn{font-weight:600}
+/* Cancha 11: dorsales en lugar de fotos */
+.av.dorsal>.avi{background:none}
+.av.dorsal svg{display:block}
 
 </style>
 </head><body><div id="app"></div>
@@ -1299,15 +1302,28 @@ function crestOld(team, size = 40) {
     + `<path d="${shape}" transform="translate(50 50) scale(.9) translate(-50 -50)" fill="none" stroke="${ring}" stroke-width="2.2" opacity=".85"/>`
     + `<path d="${shape}" fill="none" stroke="rgba(0,0,0,.45)" stroke-width="1.6"/></svg>`;
 }
+let avN = 0;
+function shade(hex, f) { const c = String(hex || '#555').replace('#', ''); const n = parseInt(c.length === 3 ? c.split('').map(x => x + x).join('') : c, 16); const ch = [n >> 16 & 255, n >> 8 & 255, n & 255].map(v => Math.round(f > 0 ? v + (255 - v) * f : v * (1 + f))); return '#' + ch.map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join(''); }
+/* Dorsal: camiseta con el número en los colores del equipo (reemplaza a las fotos) */
 function avatar(p, size = 40, team, cls = '') {
-  const url = p && p.photo && PHOTOS[p.photo];
   const L = (team && team.logo) || {};
-  const ini = p ? (p.name || '?').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() : '?';
-  const bg = L.c1 || 'var(--surface3)'; const fg = lum(L.c1) > 0.6 ? '#0B1219' : '#fff';
+  const c1 = L.c1 || '#2A3A4B', c2 = L.c2 || '#FFFFFF';
+  const l1 = lum(c1), l2 = lum(c2);
+  const cr = (a, b) => (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+  const numC = cr(l1, l2) >= 2.6 ? c2 : (cr(l1, 0) > cr(l1, 1) ? '#0B1219' : '#FFFFFF');
+  const edge = l1 > .55 ? 'rgba(0,0,0,.28)' : 'rgba(255,255,255,.22)';
+  const num = p && p.num != null ? String(p.num) : '?';
   const pid = p && (p.id || p.pid);
   const cap = pid && (team && 'captain' in team ? team.captain === pid : DATA.teams.some(t => t.captain === pid));
   const cs = Math.max(14, Math.round(size * .36));
-  return `<span class="av ${url ? 'ph' : ''} ${cls}" style="width:${size}px;height:${size}px"><span class="avi" style="${url ? 'background:transparent' : `background:${bg};color:${fg};font-size:${Math.round(size * .38)}px`}">${url ? `<img src="${url}" alt="">` : esc(ini)}</span>${cap ? `<b class="cap" title="Capitán" style="width:${cs}px;height:${cs}px;font-size:${Math.round(cs * .62)}px">C</b>` : ''}</span>`;
+  const id = 'dg' + (++avN);
+  const fs = num.length > 1 ? 44 : 50;
+  const svg = `<svg viewBox="0 0 100 100" width="100%" height="100%" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${shade(c1, .18)}"/><stop offset="1" stop-color="${shade(c1, -.28)}"/></linearGradient></defs>`
+    + `<rect width="100" height="100" fill="url(#${id})"/>`
+    + `<path d="M30 14 L42 10 Q50 18 58 10 L70 14 L92 30 L82 46 L74 41 L74 100 L26 100 L26 41 L18 46 L8 30 Z" fill="${c2}" opacity=".13"/>`
+    + `<path d="M42 10 Q50 22 58 10" fill="none" stroke="${c2}" stroke-width="4" opacity=".55"/>`
+    + `<text x="50" y="${num.length > 1 ? 70 : 72}" text-anchor="middle" font-family="'Barlow Condensed',system-ui,sans-serif" font-weight="800" font-size="${fs}" fill="${numC}" stroke="${edge}" stroke-width="1.2" paint-order="stroke" letter-spacing="-1">${esc(num)}</text></svg>`;
+  return `<span class="av dorsal ${cls}" style="width:${size}px;height:${size}px"><span class="avi">${svg}</span>${cap ? `<b class="cap" title="Capitán" style="width:${cs}px;height:${cs}px;font-size:${Math.round(cs * .62)}px">C</b>` : ''}</span>`;
 }
 function shortName(n) { const w = String(n || '').trim().split(/\s+/); return w.length > 1 ? w[0][0] + '. ' + w.slice(1).join(' ') : w[0]; }
 function lastName(n) { const w = String(n || '').trim().split(/\s+/); return w.length > 1 ? w.slice(1).join(' ') : w[0]; }
@@ -1648,7 +1664,7 @@ function playerLeagueData(lg, pid) {
   return { pl, team, cur: now, curTM: now ? (cur ? curTeamMatches : now.tm) : curTeamMatches, seasons, tot, name: pl ? pl.name : last ? last.name : '?' };
 }
 
-const APP_VER = '1.1.0';
+const APP_VER = '1.2.0';
 /* ===== Interfaz: navegación y pantallas ===== */
 const NAV = { stack: [], guard: null };
 const app = () => $('#app');
@@ -2083,7 +2099,7 @@ SCREENS.team = {
     const pk = (kind, keys, cur, prev) => `<div class="pickrow">${keys.map(k => `<button class="pick ${k === cur ? 'on' : ''}" data-pk="${kind}" data-v="${k}" aria-label="${k}">${prev(k)}</button>`).join('')}</div>`;
     const swatch = (which, cur) => `<div class="swatches">${PALETTE.map(c => `<button class="sw ${c.toLowerCase() === (cur || '').toLowerCase() ? 'on' : ''}" style="background:${c}" data-sw="${which}" data-v="${c}" aria-label="${c}"></button>`).join('')}<label class="sw custom ${PALETTE.map(x => x.toLowerCase()).includes((cur || '').toLowerCase()) ? '' : 'on'}" aria-label="Otro color"><input type="color" data-cc="${which}" value="${cur}"></label></div>`;
     const players = d.players.slice().sort((a, b) => POS_ORDER[a.pos] - POS_ORDER[b.pos] || a.num - b.num);
-    const plRows = players.map(pl => `<button class="row pl-row" data-pl="${pl.id}"><span class="dor num">${pl.num}</span>${avatar(pl, 44, d)}<div class="grow"><div class="t1">${esc(pl.name)}</div><div class="t2">${POS[pl.pos]}</div></div><span class="skill" style="background:${skillColor(pl.skill)}">${pl.skill}</span></button>`).join('');
+    const plRows = players.map(pl => `<button class="row pl-row" data-pl="${pl.id}">${avatar(pl, 44, d)}<div class="grow"><div class="t1">${esc(pl.name)}</div><div class="t2">${POS[pl.pos]}</div></div><span class="skill" style="background:${skillColor(pl.skill)}">${pl.skill}</span></button>`).join('');
     return `${topbar(p.isNew ? 'Nuevo equipo' : 'Editar equipo')}<main class="content notab">
       <div class="crest-hero" id="hero">${d.flag ? crestSVG(d, 128) : `<span class="flagi" style="width:128px;height:128px;font-size:100px;opacity:.35">${flagEmoji(null)}</span>`}</div>
       <div class="grid2" style="grid-template-columns:1fr 110px"><div class="field"><label for="tn">Nombre</label><input class="inp" id="tn" maxlength="30" value="${esc(d.name)}" placeholder="Ej: Club Andino"></div>
@@ -2149,8 +2165,7 @@ function playerSheet(p, pl, num) {
   const w = pl ? Object.assign({}, pl) : { id: uid(), name: '', pos: 'MC', num: num || 1, skill: 60, photo: null };
   const opts = Object.keys(POS).map(k => `<option value="${k}" ${w.pos === k ? 'selected' : ''}>${POS[k]}</option>`).join('');
   openSheet(`<h3>${isNew ? 'Nuevo jugador' : 'Editar jugador'}</h3>
-    <div class="photo-pick"><label style="cursor:pointer;position:relative" aria-label="Cambiar foto"><span id="phv">${avatar(w, 84, d, 'sq')}</span><span style="position:absolute;right:-6px;bottom:-6px;width:32px;height:32px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center">${IC.cam.replace('<svg', '<svg width="18" height="18"')}</span><input type="file" id="ph" accept="image/*" hidden></label>
-    <div style="flex:1;font-size:13px" class="muted">Toca para elegir una foto. Se recorta en cuadrado (1:1). Si es PNG con fondo transparente, se mantiene transparente.${w.photo ? '<br><button id="rmph" style="color:var(--rc);font-weight:600;margin-top:6px">Quitar foto</button>' : ''}</div></div>
+    <div class="photo-pick" style="justify-content:center"><span id="phv">${avatar(w, 92, d)}</span></div>
     <button class="capbtn ${d.captain === w.id ? 'on' : ''}" id="pcap" type="button"><span class="cc">C</span><div style="flex:1"><div style="font-weight:700">Capitán del equipo</div><div class="muted" style="font-size:13px">${d.captain && d.captain !== w.id ? 'Reemplaza al capitán actual' : 'Lleva la C en su foto'}</div></div><span class="chk" style="${d.captain === w.id ? 'background:var(--gold);border-color:var(--gold)' : ''}"></span></button>
     <div class="field"><label for="pn">Nombre y apellido</label><input class="inp" id="pn" maxlength="32" value="${esc(w.name)}" placeholder="Ej: Matías Soto"></div>
     <div class="grid2" style="grid-template-columns:96px 1fr"><div class="field"><label for="pd">Dorsal</label><input class="inp num" id="pd" type="number" inputmode="numeric" min="1" max="99" value="${w.num}"></div>
@@ -2160,12 +2175,7 @@ function playerSheet(p, pl, num) {
     <div class="acts">${isNew ? '<button class="btn ghost" id="pc">Cancelar</button>' : `<button class="btn danger" id="pdel">Quitar</button>`}<button class="btn pri" id="pok">${isNew ? 'Añadir' : 'Guardar'}</button></div>`, bg => {
     const ps = $('#ps', bg); rangeStyle(ps);
     ps.oninput = () => { w.skill = +ps.value; const o = $('#pso', bg); o.textContent = ps.value; o.style.color = skillColor(w.skill); rangeStyle(ps); };
-    $('#ph', bg).onchange = async e => {
-      const f = e.target.files[0]; if (!f) return;
-      try { const url = await readPhoto(f); const pid = 'ph_' + uid(); await setPhoto(pid, url); w.photo = pid; $('#phv', bg).innerHTML = avatar(w, 84, d, 'sq'); }
-      catch (err) { $('#perr', bg).textContent = 'No se pudo leer esa imagen. Prueba con otra (JPG o PNG).'; }
-    };
-    const rm = $('#rmph', bg); if (rm) rm.onclick = () => { w.photo = null; $('#phv', bg).innerHTML = avatar(w, 84, d, 'sq'); rm.remove(); };
+    $('#pd', bg).oninput = e => { const n = parseInt(e.target.value); $('#phv', bg).innerHTML = avatar(Object.assign({}, w, { num: isNaN(n) ? '?' : n }), 92, d); };
     let cap = d.captain === w.id;
     $('#pcap', bg).onclick = e => { cap = !cap; e.currentTarget.classList.toggle('on', cap); const k = e.currentTarget.querySelector('.chk'); k.style.background = cap ? 'var(--gold)' : ''; k.style.borderColor = cap ? 'var(--gold)' : ''; };
     const c = $('#pc', bg); if (c) c.onclick = closeSheet;
@@ -2327,7 +2337,7 @@ SCREENS.prematch = {
       const pen = posPenalty(P.pos, s.slot); const sel = p.sel && p.sel.k === 'f' && p.sel.i === i;
       return `<button class="slot ${sel ? 'sel' : ''}" data-f="${i}" style="left:${x}%;top:${y}%">${avatar(P, 42, team)}<span class="nm">${esc(lastName(P.name))}</span><span class="tag ${pen ? 'warn' : ''}">${s.slot} · ${effSkill(P, s.slot)}${pen ? ' (−' + pen + ')' : ''}</span></button>`;
     }).join('');
-    const bench = L.bench.map((id, j) => { const P = pl(id); if (!P) return ''; const sel = p.sel && p.sel.k === 'b' && p.sel.i === j; return `<button class="benchp ${sel ? 'sel' : ''}" data-b="${j}">${avatar(P, 40, team)}<div style="min-width:0"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(P.name)}</div><div class="muted" style="font-size:12px">${P.num} · ${POS_SHORT[P.pos]} · ${P.skill}</div></div></button>`; }).join('');
+    const bench = L.bench.map((id, j) => { const P = pl(id); if (!P) return ''; const sel = p.sel && p.sel.k === 'b' && p.sel.i === j; return `<button class="benchp ${sel ? 'sel' : ''}" data-b="${j}">${avatar(P, 40, team)}<div style="min-width:0"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(P.name)}</div><div class="muted" style="font-size:12px">${POS_SHORT[P.pos]} · ${P.skill}</div></div></button>`; }).join('');
     const S = lineupStrength(team, L);
     const bar = (l, v) => `<div class="bar3"><div class="l"><span>${l}</span><b class="num" style="color:var(--text)">${v}</b></div><div class="b"><i style="width:${v}%"></i></div></div>`;
     const missing = L.field.some(s => !s.pid);
