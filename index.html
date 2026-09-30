@@ -511,6 +511,15 @@ body{background:radial-gradient(900px 420px at 10% -140px,rgba(34,211,107,.20),t
 /* Cancha 11: dorsales en lugar de fotos */
 .av.dorsal>.avi{background:none}
 .av.dorsal svg{display:block}
+.formseg{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px}
+.formseg button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 6px;border-radius:12px;border:1px solid var(--line);background:var(--card)}
+.formseg button b{font:800 18px/1 var(--disp);letter-spacing:.03em}
+.formseg button small{font-size:11px;color:var(--muted);font-weight:600}
+.formseg button.on{border-color:var(--accent);background:rgba(34,211,107,.12)}
+.formseg button.on b{color:var(--accent)}
+.formgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.formgrid .btn{padding:0 4px;font-size:14px;min-height:38px}
+.formgrid .wand{grid-column:1/-1;gap:6px}
 
 </style>
 </head><body><div id="app"></div>
@@ -523,27 +532,59 @@ const normPos = p => p === 'DFC' ? 'DEF' : p === 'CUA' ? 'MC' : p;
 const FORMATIONS = {
   '4-4-2': ['POR', 'LAT', 'DEF', 'DEF', 'LAT', 'MC', 'MC', 'MC', 'MC', 'DEL', 'DEL'],
   '4-3-3': ['POR', 'LAT', 'DEF', 'DEF', 'LAT', 'MC', 'MC', 'MC', 'DEL', 'DEL', 'DEL'],
+  '4-3-3 MCD': ['POR', 'LAT', 'DEF', 'DEF', 'LAT', 'MCD', 'MC', 'MC', 'DEL', 'DEL', 'DEL'],
+  '4-3-3 MCO': ['POR', 'LAT', 'DEF', 'DEF', 'LAT', 'MC', 'MC', 'MCO', 'DEL', 'DEL', 'DEL'],
+  '5-3-2': ['POR', 'LAT', 'DEF', 'DEF', 'DEF', 'LAT', 'MC', 'MC', 'MC', 'DEL', 'DEL'],
+  '4-5-1': ['POR', 'LAT', 'DEF', 'DEF', 'LAT', 'MCD', 'MC', 'MC', 'MC', 'MC', 'DEL'],
+  '5-4-1': ['POR', 'LAT', 'DEF', 'DEF', 'DEF', 'LAT', 'MC', 'MC', 'MC', 'MC', 'DEL'],
+  '3-4-3': ['POR', 'DEF', 'DEF', 'DEF', 'LAT', 'MC', 'MC', 'LAT', 'DEL', 'DEL', 'DEL'],
+  '3-5-2': ['POR', 'DEF', 'DEF', 'DEF', 'LAT', 'MC', 'MCD', 'MC', 'LAT', 'DEL', 'DEL'],
 };
 // Efecto táctico de cada formación (se suma al peso de cada puesto)
 const FORM_MOD = {
-  '4-4-2': { att: 1, mid: 1.02, def: 1.03, chance: 1, name: 'Equilibrada', desc: 'Dos líneas de cuatro: orden atrás y en el medio' },
-  '4-3-3': { att: 1.05, mid: .99, def: .97, chance: 1.03, name: 'Ofensiva', desc: 'Tres puntas: más llegada, más espacios atrás' },
+  '4-4-2': { att: .98, mid: 1, def: .99, chance: 1, name: 'Equilibrada', desc: 'Dos líneas de cuatro: orden atrás y en el medio' },
+  '4-3-3': { att: 1.06, mid: 1, def: .97, chance: 1.03, name: 'Ofensiva', desc: 'Tres puntas y tres volantes: más llegada, más espacios atrás' },
+  '4-3-3 MCD': { att: 1.03, mid: 1, def: 1.01, chance: 1.02, name: 'Con ancla', desc: 'Un volante de contención protege a la defensa' },
+  '4-3-3 MCO': { att: 1.07, mid: 1.01, def: .96, chance: 1.04, name: 'Enganche', desc: 'Un mediapunta suelto entre líneas para asistir' },
+  '5-3-2': { att: .96, mid: .97, def: 1.07, chance: 1.08, name: 'Contragolpe', desc: 'Cinco atrás y dos puntas rápidas para salir' },
+  '4-5-1': { att: .94, mid: 1.02, def: .97, chance: .98, name: 'Control', desc: 'Cinco en el medio: tener la pelota y cansar al rival' },
+  '5-4-1': { att: .9, mid: 1, def: 1.08, chance: 1, name: 'Cerrojo', desc: 'Bloque bajo: muy difícil de romper, poco peligro arriba' },
+  '3-4-3': { att: 1.16, mid: 1.01, def: .96, chance: 1.1, name: 'Ataque total', desc: 'Tres centrales y todo el resto al ataque' },
+  '3-5-2': { att: 1.04, mid: 1.05, def: .95, chance: 1.02, name: 'Dominio', desc: 'Carrileros y cinco en el medio para mandar' },
 };
-// Ventajas tácticas: la formación de la izquierda saca ventaja sobre la de la derecha (se completará con más formaciones)
-const FORM_BEATS = {};
-const EDGE = { att: 1.06, mid: 1.03, def: 1.04 };
+// Ventajas tácticas: cada formación saca ventaja sobre dos y sufre ante otras dos
+const FORM_BEATS = {
+  '4-4-2': ['3-4-3', '4-3-3 MCO'],
+  '4-3-3': ['3-5-2', '4-5-1'],
+  '4-3-3 MCD': ['4-3-3 MCO', '4-3-3'],
+  '4-3-3 MCO': ['5-4-1', '5-3-2'],
+  '5-3-2': ['4-3-3', '4-4-2'],
+  '4-5-1': ['4-4-2', '3-5-2'],
+  '5-4-1': ['3-4-3', '4-3-3 MCD'],
+  '3-4-3': ['4-5-1', '4-3-3 MCD'],
+  '3-5-2': ['5-4-1', '5-3-2'],
+};
+const beatsF = (a, b) => (FORM_BEATS[a] || []).includes(b);
+const EDGE = { att: 1.08, mid: 1.04, def: 1.05 };
 const DOWN_PEN = 0.04; // por cada jugador de menos respecto al rival
 // coordenadas de cada puesto (x %, y % desde el arco propio abajo)
 const FORM_XY = {
   '4-4-2': [[50, 90], [12, 68], [37, 72], [63, 72], [88, 68], [12, 44], [37, 47], [63, 47], [88, 44], [35, 18], [65, 18]],
   '4-3-3': [[50, 90], [12, 68], [37, 72], [63, 72], [88, 68], [24, 47], [50, 51], [76, 47], [16, 21], [50, 15], [84, 21]],
+  '4-3-3 MCD': [[50, 90], [12, 68], [37, 72], [63, 72], [88, 68], [50, 57], [27, 42], [73, 42], [16, 19], [50, 14], [84, 19]],
+  '4-3-3 MCO': [[50, 90], [12, 68], [37, 72], [63, 72], [88, 68], [28, 52], [72, 52], [50, 36], [16, 20], [50, 13], [84, 20]],
+  '5-3-2': [[50, 90], [9, 60], [28, 72], [50, 74], [72, 72], [91, 60], [24, 45], [50, 48], [76, 45], [35, 18], [65, 18]],
+  '4-5-1': [[50, 90], [12, 70], [37, 73], [63, 73], [88, 70], [50, 57], [11, 39], [36, 43], [64, 43], [89, 39], [50, 15]],
+  '5-4-1': [[50, 90], [9, 62], [28, 72], [50, 74], [72, 72], [91, 62], [13, 43], [38, 46], [62, 46], [87, 43], [50, 16]],
+  '3-4-3': [[50, 90], [26, 72], [50, 74], [74, 72], [10, 47], [37, 50], [63, 50], [90, 47], [16, 20], [50, 15], [84, 20]],
+  '3-5-2': [[50, 90], [26, 72], [50, 74], [74, 72], [10, 45], [30, 44], [50, 55], [70, 44], [90, 45], [35, 17], [65, 17]],
 };
 /* Puntos de habilidad que se restan al jugar fuera de posición (jugador -> puesto) */
 const PEN = {
-  DEF: { LAT: 6, MC: 12, DEL: 20 },
-  LAT: { DEF: 6, MC: 8, DEL: 12 },
-  MC: { DEF: 10, LAT: 8, DEL: 8 },
-  DEL: { MC: 8, LAT: 12, DEF: 20 },
+  DEF: { LAT: 6, MC: 12, MCD: 5, MCO: 16, DEL: 20 },
+  LAT: { DEF: 6, MC: 8, MCD: 8, MCO: 10, DEL: 12 },
+  MC: { DEF: 10, LAT: 8, MCD: 0, MCO: 0, DEL: 8 },
+  DEL: { MC: 8, MCD: 15, MCO: 4, LAT: 12, DEF: 20 },
 };
 function posPenalty(pos, slot) {
   if (slot === 'POR') return pos === 'POR' ? 0 : 40;
@@ -553,13 +594,13 @@ function posPenalty(pos, slot) {
 }
 function effSkill(p, slot) { return Math.max(1, p.skill - posPenalty(p.pos, slot)); }
 function fit(pPos, slot) { return 1 - posPenalty(pPos, slot) / 60; }
-const W_ATT = { POR: 0, DEF: .15, LAT: .35, MC: .7, DEL: 1 };
-const W_MID = { POR: .05, DEF: .3, LAT: .45, MC: 1, DEL: .4 };
-const W_DEF = { POR: 0, DEF: 1, LAT: .75, MC: .45, DEL: .12 };
-const W_SHOOT = { POR: 0, DEF: .9, LAT: .8, MC: 2, DEL: 5 };
-const FINISH = { POR: .6, DEF: .85, LAT: .85, MC: 1, DEL: 1.12 }; // definición según el puesto
-const W_ASSIST = { POR: .05, DEF: .8, LAT: 2.2, MC: 3, DEL: 2 };
-const W_FOUL = { POR: .3, DEF: 2.1, LAT: 1.8, MC: 1.8, DEL: 1.2 };
+const W_ATT = { POR: 0, DEF: .15, LAT: .35, MCD: .45, MC: .7, MCO: .9, DEL: 1 };
+const W_MID = { POR: .05, DEF: .3, LAT: .45, MCD: .95, MC: 1, MCO: .9, DEL: .4 };
+const W_DEF = { POR: 0, DEF: 1, LAT: .75, MCD: .8, MC: .45, MCO: .22, DEL: .12 };
+const W_SHOOT = { POR: 0, DEF: .9, LAT: .8, MCD: 1.2, MC: 2, MCO: 2.8, DEL: 5 };
+const FINISH = { POR: .6, DEF: .85, LAT: .85, MCD: .95, MC: 1, MCO: 1.05, DEL: 1.12 }; // definición según el puesto
+const W_ASSIST = { POR: .05, DEF: .6, LAT: 2.2, MCD: 2.2, MC: 3, MCO: 3.6, DEL: 2 };
+const W_FOUL = { POR: .3, DEF: 2.1, LAT: 1.8, MCD: 2.3, MC: 1.8, MCO: 1.4, DEL: 1.2 };
 const DEF_SLOTS = ['DEF', 'LAT'];
 const isDefSlot = s => s === 'DEF' || s === 'LAT';
 
@@ -619,9 +660,11 @@ function bestLineupFor(players, formation) {
   const value = field.reduce((acc, f) => { const pl = players.find(x => x.id === f.pid); return acc + (pl ? effSkill(pl, f.slot) : 0); }, 0);
   return { formation, field, bench, value };
 }
-const SQUAD = 23, STARTERS = 11;
+const SQUAD = 24, STARTERS = 11;
 function autoLineup(team) {
   const players = (team.players || []).slice(0, SQUAD);
+  // formación predeterminada del equipo (si tiene una)
+  if (team.formation && FORMATIONS[team.formation]) return bestLineupFor(players, team.formation);
   let best = null;
   for (const f of Object.keys(FORMATIONS)) {
     const l = bestLineupFor(players, f);
@@ -642,7 +685,7 @@ function teamStrength(M, t) {
   }
   const syn = 0.85 + 0.3 * (T.skill / 100);
   const fm = FORM_MOD[T.formation] || { att: 1, mid: 1, def: 1, chance: 1 };
-  const e = FORM_BEATS[T.formation] === M.teams[1 - t].formation ? EDGE : { att: 1, mid: 1, def: 1 };
+  const e = beatsF(T.formation, M.teams[1 - t].formation) ? EDGE : { att: 1, mid: 1, def: 1 };
   // inferioridad numérica: además de perder a la jugadora, el equipo se desordena un poco
   const down = Math.max(0, M.teams[1 - t].field.length - T.field.length);
   const nf = 1 - DOWN_PEN * down;
@@ -694,11 +737,11 @@ function onField(M, t) { return M.teams[t].field.map(f => M.players[f.pid]).filt
 function bump(p, d) { p.rating = clamp(p.rating + d, 3, 10); }
 
 /* Calibración para fútbol 11 (valores de referencia de ligas profesionales) */
-const CAL = { chance: .29, foul: .24, pen: .012, yellow: .165, red: .0015, onA: .18, onB: .22, goal: .285, defNorm: 4, cornSave: .55, cornMiss: .4 };
+const CAL = { chance: .29, foul: .24, pen: .012, yellow: .165, red: .0015, onA: .18, onB: .22, goal: .295, defNorm: 4, cornSave: .55, cornMiss: .4 };
 /* Un minuto de juego */
 function playMinute(M) {
   const S = [teamStrength(M, 0), teamStrength(M, 1)];
-  const homeAdv = M.neutral ? 1 : 1.06;
+  const homeAdv = M.neutral ? 1 : 1.08;
   const m0 = Math.pow(S[0].mid * homeAdv, 1.1), m1 = Math.pow(S[1].mid, 1.1);
   const pHome = clamp(m0 / (m0 + m1), .28, .72);
   const t = R() < pHome ? 0 : 1, o = 1 - t;
@@ -1259,7 +1302,11 @@ function flagColors(code) {
     if (!arr.length) return null;
     const hex = c => '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('').toUpperCase();
     const far = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) > 90;
-    const c1 = arr[0]; const c2 = arr.find(c => far(c, c1)) || (c1[0] + c1[1] + c1[2] > 380 ? [21, 23, 26] : [255, 255, 255]);
+    const cnts = Object.values(cnt).sort((a, b) => b.n - a.n);
+    const L = c => (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
+    const c1 = arr[0]; let c2 = null, bs = -1;
+    arr.forEach((c, i) => { if (!far(c, c1)) return; const sc = cnts[i].n * (0.5 + Math.abs(L(c) - L(c1))); if (sc > bs) { bs = sc; c2 = c; } });
+    if (!c2) c2 = L(c1) > .6 ? [21, 23, 26] : [255, 255, 255];
     return [hex(c1), hex(c2)];
   } catch (e) { return null; }
 }
@@ -1310,7 +1357,7 @@ function avatar(p, size = 40, team, cls = '') {
   const c1 = L.c1 || '#2A3A4B', c2 = L.c2 || '#FFFFFF';
   const l1 = lum(c1), l2 = lum(c2);
   const cr = (a, b) => (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
-  const numC = cr(l1, l2) >= 2.6 ? c2 : (cr(l1, 0) > cr(l1, 1) ? '#0B1219' : '#FFFFFF');
+  const numC = cr(l1, l2) >= 1.8 ? c2 : (l1 > .6 ? '#0B1219' : '#FFFFFF');
   const edge = l1 > .55 ? 'rgba(0,0,0,.28)' : 'rgba(255,255,255,.22)';
   const num = p && p.num != null ? String(p.num) : '?';
   const pid = p && (p.id || p.pid);
@@ -1364,8 +1411,8 @@ function sampleData() {
     { name: 'Real Brisa', abbr: 'RBR', flag: 'BR', logo: { shape: 'banda', pattern: 'diagonal', symbol: 'ninguno', c1: '#FFFFFF', c2: '#1E88E5' }, skill: 66, base: 60 },
     { name: 'Estrellas FC', abbr: 'EFC', flag: 'GB-ENG', logo: { shape: 'cuadrado', pattern: 'liso', symbol: 'iniciales', c1: '#6A2FB0', c2: '#FFC940' }, skill: 48, base: 57 },
   ];
-  const posSet = ['POR', 'LAT', 'DEF', 'DEF', 'LAT', 'MC', 'MC', 'MC', 'MC', 'DEL', 'DEL', 'POR', 'DEF', 'DEF', 'LAT', 'LAT', 'MC', 'MC', 'MC', 'DEL', 'DEL', 'DEL', 'POR'];
-  const nums = [1, 2, 4, 5, 3, 6, 8, 10, 7, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
+  const posSet = ['POR', 'LAT', 'DEF', 'DEF', 'LAT', 'MC', 'MC', 'MC', 'MC', 'DEL', 'DEL', 'POR', 'DEF', 'DEF', 'LAT', 'LAT', 'MC', 'MC', 'MC', 'DEL', 'DEL', 'DEL', 'POR', 'DEF'];
+  const nums = [1, 2, 4, 5, 3, 6, 8, 10, 7, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
   const used = new Set();
   return teams.map(t => {
     const players = posSet.map((pos, i) => {
@@ -1431,7 +1478,7 @@ function createLeague(name, type, teamIds) {
 function migrateLeague(lg) {
   // temporada ya cerrada pero aún sin registro por jugadora: se completa con los partidos que siguen guardados
   if (lg.history && lg.history.length) { const h = lg.history[lg.history.length - 1]; if (!h.players && h.n === lg.season && lg.fixtures.some(f => f.res)) h.players = seasonPlayers(lg.fixtures); } if (lg.type === 'po' && !lg.hbal) { balanceHome(lg.fixtures || []); lg.hbal = 1; } if (!lg.season) lg.season = 1; if (!lg.history) lg.history = []; if (!lg.out) lg.out = {}; (lg.fixtures || []).forEach(f => f.res && f.res.lines.forEach(l => { l.pos = normPos(l.pos); })); }
-function migrateTeams() { DATA.teams.forEach(t => t.players.forEach(p => { p.pos = normPos(p.pos); })); }
+function migrateTeams() { DATA.teams.forEach(t => { t.players.forEach(p => { p.pos = normPos(p.pos); }); if (t.flag && typeof document !== 'undefined') { const c = flagColors(t.flag); if (c) t.logo = Object.assign({}, t.logo, { c1: c[0], c2: c[1] }); } if (t.formation && !FORMATIONS[t.formation]) delete t.formation; }); }
 function teamSnap(id) { const t = teamById(id); return t ? { id, name: t.name, abbr: t.abbr, logo: t.logo } : { id, name: '—', abbr: '—' }; }
 function runnerUpId(lg) {
   if (!lg.champion) return null;
@@ -1488,6 +1535,8 @@ function ycCount(l) { return l.rc > 0 && l.yc >= 2 ? 0 : (l.yc || 0); }
 function restoreLineup(lg, team) {
   const pref = lg.lineups && lg.lineups[team.id];
   if (!pref || !FORMATIONS[pref.formation]) return null;
+  // si el equipo tiene formación predeterminada, la alineación guardada solo vale si usa esa formación
+  if (team.formation && FORMATIONS[team.formation] && pref.formation !== team.formation) return null;
   const avail = availablePlayers(lg, team); const ok = new Set(avail.map(p => p.id));
   const field = FORMATIONS[pref.formation].map((slot, i) => ({ slot, pid: pref.field[i] && ok.has(pref.field[i]) ? pref.field[i] : null }));
   const used = new Set(field.map(f => f.pid).filter(Boolean));
@@ -1664,7 +1713,7 @@ function playerLeagueData(lg, pid) {
   return { pl, team, cur: now, curTM: now ? (cur ? curTeamMatches : now.tm) : curTeamMatches, seasons, tot, name: pl ? pl.name : last ? last.name : '?' };
 }
 
-const APP_VER = '1.2.0';
+const APP_VER = '1.4.0';
 /* ===== Interfaz: navegación y pantallas ===== */
 const NAV = { stack: [], guard: null };
 const app = () => $('#app');
@@ -2077,7 +2126,7 @@ SCREENS.teams = {
     }).join('');
     const sb = (k, l) => `<button class="${sort === k ? 'on' : ''}" data-sort="${k}">${l}</button>`;
     return `${topbar('Equipos', { back: false, right: DATA.teams.length > 1 ? `<div class="sortseg" role="group" aria-label="Ordenar">${sb('created', 'Creado')}${sb('name', 'Nombre')}${sb('media', 'Media')}</div>` : '' })}<main class="content">
-      ${rows ? `<div class="card list">${rows}</div>` : `<div class="card empty">${IC.shield.replace('<svg', '<svg width="44" height="44" style="color:var(--accent)"')}<p>Crea tu primer equipo: nombre, escudo y sus 23 jugadores.</p><button class="btn pri" data-newteam>Nuevo equipo</button></div>`}
+      ${rows ? `<div class="card list">${rows}</div>` : `<div class="card empty">${IC.shield.replace('<svg', '<svg width="44" height="44" style="color:var(--accent)"')}<p>Crea tu primer equipo: nombre, bandera y sus 24 jugadores.</p><button class="btn pri" data-newteam>Nuevo equipo</button></div>`}
     </main>${rows ? `<button class="btn pri fab" data-newteam>${IC.plus.replace('<svg', '<svg width="20" height="20"')} Nuevo equipo</button>` : ''}${tabbar('teams')}`;
   },
   after() {
@@ -2105,12 +2154,11 @@ SCREENS.team = {
       <div class="grid2" style="grid-template-columns:1fr 110px"><div class="field"><label for="tn">Nombre</label><input class="inp" id="tn" maxlength="30" value="${esc(d.name)}" placeholder="Ej: Club Andino"></div>
       <div class="field"><label for="ta">Abreviatura</label><input class="inp" id="ta" maxlength="3" value="${esc(d.abbr)}" placeholder="AND" style="text-transform:uppercase"></div></div>
       <div class="field"><span class="flabel">Bandera</span><button class="row flagbtn" id="pickFlag" type="button">${d.flag ? `<span class="flagi" style="width:40px;height:40px;font-size:32px">${flagEmoji(d.flag)}</span><div class="grow"><div class="t1">${esc(flagName(d.flag))}</div><div class="t2">Toca para cambiarla</div></div>` : `<span class="flagi" style="width:40px;height:40px;font-size:32px;opacity:.5">${flagEmoji(null)}</span><div class="grow"><div class="t1">Elegir bandera</div><div class="t2">Será el ícono del equipo</div></div>`}${IC.chev}</button></div>
-      <div class="field"><span class="flabel">Color principal <span style="text-transform:none;letter-spacing:0;color:var(--faint)">(se toma de la bandera; úsalo en marcadores)</span></span>${swatch('c1', L.c1)}</div>
-      <div class="field"><span class="flabel">Color secundario</span>${swatch('c2', L.c2)}</div>
+      <div class="field"><span class="flabel">Formación predeterminada</span><div class="formseg">${['', ...Object.keys(FORMATIONS)].map(k => `<button class="${(d.formation || '') === k ? 'on' : ''}" data-dform="${k}">${k ? `<b>${k}</b><small>${FORM_MOD[k].name}</small>` : `<b>Auto</b><small>La mejor</small>`}</button>`).join('')}</div><span class="muted" style="font-size:13px">${d.formation ? `Cada partido parte en ${d.formation}. En la previa del partido la puedes cambiar igual.` : 'Cada partido usa la formación que mejor calce con los jugadores disponibles.'}</span></div>
       <div class="field"><label for="ts">Sinergia del equipo</label><div class="rangewrap"><input type="range" id="ts" min="1" max="100" value="${d.skill}"><output id="tso" class="num">${d.skill}</output></div><span class="muted" style="font-size:13px">Qué tan bien juegan juntos. Multiplica el rendimiento de todo el equipo.</span></div>
       <div class="sec-t"><h2>Plantilla</h2><span class="muted num">${d.players.length}/${SQUAD}</span></div>
       <div class="card list">${plRows}${d.players.length < SQUAD ? `<button class="row" id="addPl" style="color:var(--accent);font-weight:700;justify-content:center">${IC.plus.replace('<svg', '<svg width="20" height="20"')} Añadir jugador</button>` : ''}</div>
-      <p class="muted" style="margin:0;font-size:13px">11 titulares + 12 suplentes. La alineación se arma sola antes de cada partido y la puedes cambiar.</p>
+      <p class="muted" style="margin:0;font-size:13px">11 titulares + 13 suplentes. La alineación se arma sola antes de cada partido y la puedes cambiar.</p>
       ${p.isNew ? '' : `<button class="btn danger block" id="delTeam">Eliminar equipo</button>`}
       <div id="terr" class="err"></div>
     </main><div class="bottomcta"><button class="btn pri block" id="saveTeam">Guardar equipo</button></div>`;
@@ -2125,8 +2173,7 @@ SCREENS.team = {
     const ts = $('#ts'); rangeStyle(ts); ts.oninput = () => { d.skill = +ts.value; $('#tso').textContent = ts.value; rangeStyle(ts); dirty(); };
     const rerender = () => { p._scroll = scrollY; render(); };
     $('#pickFlag').onclick = () => flagPicker(d.flag, code => { d.flag = code; const c = flagColors(code); if (c) { d.logo.c1 = c[0]; d.logo.c2 = c[1]; } dirty(); rerender(); });
-    app().querySelectorAll('[data-sw]').forEach(b => b.onclick = () => { d.logo[b.dataset.sw] = b.dataset.v; dirty(); rerender(); });
-    app().querySelectorAll('[data-cc]').forEach(i => i.onchange = () => { d.logo[i.dataset.cc] = i.value; dirty(); rerender(); });
+    app().querySelectorAll('[data-dform]').forEach(b => b.onclick = () => { if (b.dataset.dform) d.formation = b.dataset.dform; else delete d.formation; dirty(); rerender(); });
     app().querySelectorAll('[data-pl]').forEach(b => b.onclick = () => playerSheet(p, d.players.find(x => x.id === b.dataset.pl)));
     const add = $('#addPl'); if (add) add.onclick = () => {
       const used = new Set(d.players.map(x => x.num)); let n = 1; while (used.has(n)) n++;
@@ -2345,9 +2392,9 @@ SCREENS.prematch = {
     return `${topbar(stageLabel(f, lg))}<main class="content notab">
       <div class="vs card duel" style="padding:16px 8px;--hc:${teamColors(T[0], T[1])[0]};--ac:${teamColors(T[0], T[1])[1]}"><div class="side">${crestSVG(T[0], 56)}<b>${esc(T[0].name)}</b></div><div class="mid">VS</div><div class="side">${crestSVG(T[1], 56)}<b>${esc(T[1].name)}</b></div></div>
       <div class="seg">${T.map((t, i) => `<button class="${side === i ? 'on' : ''}" data-side="${i}">${esc(t.abbr)}${i === 0 && !isNeutral(lg, f) ? ' · Local' : ''}</button>`).join('')}</div>
-      <div style="display:flex;gap:6px;align-items:center">${Object.keys(FORMATIONS).map(k => `<button class="btn sm ${L.formation === k ? 'blue' : 'ghost'}" style="flex:1;padding:0 4px;font-size:15px" data-form="${k}">${k}</button>`).join('')}<button class="btn sm ghost" id="autoL" style="padding:0 8px" aria-label="Alineación automática">${IC.wand.replace('<svg', '<svg width="20" height="20"')}</button></div>
-      ${(() => { const fm = FORM_MOD[L.formation]; const rivalF = p.lineups[1 - side].formation; const beats = FORM_BEATS[L.formation]; const loses = Object.keys(FORM_BEATS).find(k => FORM_BEATS[k] === L.formation);
-        const st = beats === rivalF ? '<span class="chip" style="background:rgba(53,208,127,.15);color:var(--good)">Ventaja táctica</span>' : FORM_BEATS[rivalF] === L.formation ? '<span class="chip" style="background:rgba(255,77,94,.15);color:var(--rc)">Desventaja táctica</span>' : '';
+      <div class="formgrid">${Object.keys(FORMATIONS).map(k => `<button class="btn sm ${L.formation === k ? 'blue' : 'ghost'}" data-form="${k}">${k}</button>`).join('')}<button class="btn sm ghost wand" id="autoL" aria-label="Alineación automática">${IC.wand.replace('<svg', '<svg width="18" height="18"')} Automática</button></div>
+      ${(() => { const fm = FORM_MOD[L.formation]; const rivalF = p.lineups[1 - side].formation; const beats = (FORM_BEATS[L.formation] || []).join(' y '); const loses = Object.keys(FORM_BEATS).filter(k => beatsF(k, L.formation)).join(' y ');
+        const st = beatsF(L.formation, rivalF) ? '<span class="chip" style="background:rgba(53,208,127,.15);color:var(--good)">Ventaja táctica</span>' : beatsF(rivalF, L.formation) ? '<span class="chip" style="background:rgba(255,77,94,.15);color:var(--rc)">Desventaja táctica</span>' : '';
         const nm = id => { const x = team.players.find(q => q.id === id); return x ? esc(x.name) : '—'; };
         const rp = Object.values(p.repl[side] || {}).filter(r => r.orig);
         const savedInfo = p.saved[side] ? `<div style="font-size:12px;color:var(--accent2);display:flex;flex-direction:column;gap:3px;border-top:1px solid var(--line);padding-top:8px;margin-top:2px"><span>↺ Alineación guardada del partido anterior</span>${rp.map(r => `<span style="color:var(--mid)">Baja de ${nm(r.orig)}${lg.out && lg.out[r.orig] ? ' (' + (lg.out[r.orig].type === 'susp' ? 'suspendido' : 'lesionado') + ')' : ''} → ${r.fill ? 'entra ' + nm(r.fill) : 'puesto vacío'}</span>`).join('')}</div>` : '';
