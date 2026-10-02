@@ -521,6 +521,12 @@ body{background:radial-gradient(900px 420px at 10% -140px,rgba(34,211,107,.20),t
 .formgrid .btn{padding:0 4px;font-size:14px;min-height:38px}
 .formgrid .wand{grid-column:1/-1;gap:6px}
 .lu-ic{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background:rgba(34,211,107,.12);color:var(--accent);flex:none}
+.flagi.crestimg{filter:drop-shadow(0 2px 4px rgba(0,0,0,.4))}
+.flagi.crestimg img{width:100%;height:100%;object-fit:contain;display:block}
+.crestbox{border:1px solid var(--line);border-radius:14px;background:var(--card);padding:12px;display:flex;flex-direction:column;gap:10px}
+.crestbox .cb-top{display:flex;align-items:center;gap:12px}
+.crestbox .t1{font-weight:700}.crestbox .t2{font-size:13px;color:var(--muted)}
+.crestbox .cb-acts{display:flex;gap:8px}
 
 </style>
 </head><body><div id="app"></div>
@@ -1325,6 +1331,15 @@ function flagColors(code) {
     const cv = document.createElement('canvas'); cv.width = cv.height = 64; const x = cv.getContext('2d');
     x.textBaseline = 'middle'; x.textAlign = 'center'; x.font = '52px "Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif';
     x.fillText(flagEmoji(code), 32, 34);
+    return canvasColors(x);
+  } catch (e) { return null; }
+}
+// colores del equipo a partir de la imagen del escudo
+function imageColors(url) {
+  return new Promise(res => { const img = new Image(); img.onload = () => { try { const cv = document.createElement('canvas'); cv.width = cv.height = 64; const x = cv.getContext('2d'); x.drawImage(img, 0, 0, 64, 64); res(canvasColors(x)); } catch (e) { res(null); } }; img.onerror = () => res(null); img.src = url; });
+}
+function canvasColors(x) {
+  try {
     const d = x.getImageData(0, 0, 64, 64).data; const cnt = {};
     for (let i = 0; i < d.length; i += 4) { if (d[i + 3] < 220) continue; const k = (d[i] >> 5) + ',' + (d[i + 1] >> 5) + ',' + (d[i + 2] >> 5); (cnt[k] = cnt[k] || { n: 0, r: 0, g: 0, b: 0 }); const o = cnt[k]; o.n++; o.r += d[i]; o.g += d[i + 1]; o.b += d[i + 2]; }
     const arr = Object.values(cnt).sort((a, b) => b.n - a.n).map(o => [o.r / o.n, o.g / o.n, o.b / o.n]);
@@ -1340,6 +1355,10 @@ function flagColors(code) {
   } catch (e) { return null; }
 }
 function crestSVG(team, size = 40) {
+  // los registros antiguos (historial) usan el escudo/bandera actual del equipo
+  if (team && !team.flag && !team.crest && team.id && typeof teamById === 'function') { const cur = teamById(team.id); if (cur && (cur.flag || cur.crest)) team = cur; }
+  const curl = team && team.crest && PHOTOS[team.crest];
+  if (curl) return `<span class="flagi crestimg" style="width:${size}px;height:${size}px"><img src="${curl}" alt="${esc(team.name || '')}"></span>`;
   if (team && team.flag) return `<span class="flagi" style="width:${size}px;height:${size}px;font-size:${Math.round(size * .8)}px" role="img" aria-label="${esc(flagName(team.flag))}">${flagEmoji(team.flag)}</span>`;
   return crestOld(team, size);
 }
@@ -1431,6 +1450,25 @@ function readPhoto(file) {
   });
 }
 
+// escudo: la imagen completa se encaja en un cuadrado (sin recortar) y conserva la transparencia
+function readCrest(file) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const out = 320, k = out / Math.max(img.width, img.height), w = img.width * k, h = img.height * k;
+        const c = document.createElement('canvas'); c.width = c.height = out;
+        const x = c.getContext('2d'); x.imageSmoothingQuality = 'high';
+        x.drawImage(img, (out - w) / 2, (out - h) / 2, w, h);
+        const wp = c.toDataURL('image/webp', 0.92); res(wp.startsWith('data:image/webp') ? wp : c.toDataURL('image/png'));
+      };
+      img.onerror = rej; img.src = fr.result;
+    };
+    fr.onerror = rej; fr.readAsDataURL(file);
+  });
+}
+
 /* --- datos de ejemplo --- */
 function sampleData() {
   const first = ['Matías', 'Benjamín', 'Vicente', 'Martín', 'Agustín', 'Joaquín', 'Tomás', 'Lucas', 'Maximiliano', 'Diego', 'Nicolás', 'Felipe', 'Sebastián', 'Cristóbal', 'Ignacio', 'Gabriel', 'Álvaro', 'Pablo', 'Javier', 'Rodrigo', 'Andrés', 'Bastián', 'Gonzalo', 'Esteban', 'Fernando', 'Hugo', 'Emilio', 'Simón', 'Mateo', 'Julián'];
@@ -1511,8 +1549,8 @@ function createLeague(name, type, teamIds) {
 function migrateLeague(lg) {
   // temporada ya cerrada pero aún sin registro por jugadora: se completa con los partidos que siguen guardados
   if (lg.history && lg.history.length) { const h = lg.history[lg.history.length - 1]; if (!h.players && h.n === lg.season && lg.fixtures.some(f => f.res)) h.players = seasonPlayers(lg.fixtures); } if (lg.type === 'po' && !lg.hbal) { balanceHome(lg.fixtures || []); lg.hbal = 1; } if (!lg.season) lg.season = 1; if (!lg.history) lg.history = []; if (!lg.out) lg.out = {}; (lg.fixtures || []).forEach(f => f.res && f.res.lines.forEach(l => { l.pos = normPos(l.pos); })); }
-function migrateTeams() { DATA.teams.forEach(t => { t.players.forEach(p => { p.pos = normPos(p.pos); }); if (t.flag && typeof document !== 'undefined') { const c = flagColors(t.flag); if (c) t.logo = Object.assign({}, t.logo, { c1: c[0], c2: c[1] }); } if (t.formation) { if (FORMATIONS[t.formation] && !t.lineup && t.players.length) { const L = bestLineupFor(t.players, t.formation); t.lineup = { formation: L.formation, field: L.field.map(f => f.pid), bench: L.bench }; } delete t.formation; } if (t.lineup && !validPref(t.lineup)) delete t.lineup; }); }
-function teamSnap(id) { const t = teamById(id); return t ? { id, name: t.name, abbr: t.abbr, logo: t.logo } : { id, name: '—', abbr: '—' }; }
+function migrateTeams() { DATA.teams.forEach(t => { t.players.forEach(p => { p.pos = normPos(p.pos); }); if (t.flag && !t.crest && typeof document !== 'undefined') { const c = flagColors(t.flag); if (c) t.logo = Object.assign({}, t.logo, { c1: c[0], c2: c[1] }); } if (t.formation) { if (FORMATIONS[t.formation] && !t.lineup && t.players.length) { const L = bestLineupFor(t.players, t.formation); t.lineup = { formation: L.formation, field: L.field.map(f => f.pid), bench: L.bench }; } delete t.formation; } if (t.lineup && !validPref(t.lineup)) delete t.lineup; }); }
+function teamSnap(id) { const t = teamById(id); return t ? { id, name: t.name, abbr: t.abbr, logo: t.logo, flag: t.flag, crest: t.crest } : { id, name: '—', abbr: '—' }; }
 function runnerUpId(lg) {
   if (!lg.champion) return null;
   if (isMD(lg)) { const st = standings(divSub(lg, 0)); return st[1] ? st[1].id : null; }
@@ -1732,7 +1770,7 @@ function playerLeagueData(lg, pid) {
   return { pl, team, cur: now, curTM: now ? (cur ? curTeamMatches : now.tm) : curTeamMatches, seasons, tot, name: pl ? pl.name : last ? last.name : '?' };
 }
 
-const APP_VER = '1.7.0';
+const APP_VER = '1.8.0';
 /* ===== Interfaz: navegación y pantallas ===== */
 const NAV = { stack: [], guard: null };
 const app = () => $('#app');
@@ -2169,10 +2207,11 @@ SCREENS.team = {
     const players = d.players.slice().sort((a, b) => POS_ORDER[a.pos] - POS_ORDER[b.pos] || a.num - b.num);
     const plRows = players.map(pl => `<button class="row pl-row" data-pl="${pl.id}">${avatar(pl, 44, d)}<div class="grow"><div class="t1">${esc(pl.name)}</div><div class="t2">${POS[pl.pos]}</div></div><span class="skill" style="background:${skillColor(pl.skill)}">${pl.skill}</span></button>`).join('');
     return `${topbar(p.isNew ? 'Nuevo equipo' : 'Editar equipo')}<main class="content notab">
-      <div class="crest-hero" id="hero">${d.flag ? crestSVG(d, 128) : `<span class="flagi" style="width:128px;height:128px;font-size:100px;opacity:.35">${flagEmoji(null)}</span>`}</div>
+      <div class="crest-hero" id="hero">${d.flag || (d.crest && PHOTOS[d.crest]) ? crestSVG(d, 128) : `<span class="flagi" style="width:128px;height:128px;font-size:100px;opacity:.35">${flagEmoji(null)}</span>`}</div>
       <div class="grid2" style="grid-template-columns:1fr 110px"><div class="field"><label for="tn">Nombre</label><input class="inp" id="tn" maxlength="30" value="${esc(d.name)}" placeholder="Ej: Club Andino"></div>
       <div class="field"><label for="ta">Abreviatura</label><input class="inp" id="ta" maxlength="3" value="${esc(d.abbr)}" placeholder="AND" style="text-transform:uppercase"></div></div>
       <div class="field"><span class="flabel">Bandera</span><button class="row flagbtn" id="pickFlag" type="button">${d.flag ? `<span class="flagi" style="width:40px;height:40px;font-size:32px">${flagEmoji(d.flag)}</span><div class="grow"><div class="t1">${esc(flagName(d.flag))}</div><div class="t2">Toca para cambiarla</div></div>` : `<span class="flagi" style="width:40px;height:40px;font-size:32px;opacity:.5">${flagEmoji(null)}</span><div class="grow"><div class="t1">Elegir bandera</div><div class="t2">Será el ícono del equipo</div></div>`}${IC.chev}</button></div>
+      <div class="field"><span class="flabel">Escudo <span style="text-transform:none;letter-spacing:0;color:var(--faint)">(opcional)</span></span><div class="crestbox"><div class="cb-top">${d.crest && PHOTOS[d.crest] ? `<span class="flagi crestimg" style="width:44px;height:44px"><img src="${PHOTOS[d.crest]}" alt=""></span>` : `<span class="lu-ic">${IC.shield.replace('<svg', '<svg width="22" height="22"')}</span>`}<div class="grow"><div class="t1">${d.crest ? 'Escudo cargado' : 'Sin escudo'}</div><div class="t2">${d.crest ? 'Se usa como ícono en vez de la bandera y da los colores del equipo.' : 'Si subes una imagen, se usa como ícono en vez de la bandera. PNG con fondo transparente queda mejor.'}</div></div></div><div class="cb-acts"><label class="btn sm ghost" style="cursor:pointer;flex:1">${d.crest ? 'Cambiar' : 'Subir imagen'}<input type="file" id="crestIn" accept="image/*" hidden></label>${d.crest ? '<button class="btn sm ghost" id="crestRm" style="color:var(--rc);flex:1">Quitar</button>' : ''}</div></div></div>
       <div class="field"><span class="flabel">Alineación predeterminada</span><button class="row flagbtn" id="editLineup" type="button"><span class="lu-ic">${IC.shirt.replace('<svg', '<svg width="24" height="24"')}</span><div class="grow"><div class="t1">${validPref(d.lineup) ? `${d.lineup.formation} · ${FORM_MOD[d.lineup.formation].name}` : 'Automática'}</div><div class="t2">${validPref(d.lineup) ? 'Titulares y suplentes fijos. Si falta alguien, entra el mejor disponible' : 'Cada partido se arma la mejor alineación posible'}</div></div>${IC.chev}</button></div>
       <div class="field"><label for="ts">Sinergia del equipo</label><div class="rangewrap"><input type="range" id="ts" min="1" max="100" value="${d.skill}"><output id="tso" class="num">${d.skill}</output></div><span class="muted" style="font-size:13px">Qué tan bien juegan juntos. Multiplica el rendimiento de todo el equipo.</span></div>
       <div class="sec-t"><h2>Plantilla</h2><span class="muted num" ${d.players.length > SQUAD ? 'style="color:var(--bad)"' : ''}>${d.players.length}/${SQUAD}</span></div>${d.players.length > SQUAD ? `<div class="banner" style="background:rgba(242,104,61,.12);border-color:rgba(242,104,61,.4)"><div class="grow">Sobran <b>${d.players.length - SQUAD}</b> jugadores: el plantel es de ${SQUAD} (11 + 5). Toca a un jugador y usa <b>Quitar</b>. Mientras tanto, a los partidos van los ${SQUAD} mejores.</div></div>` : ''}
@@ -2192,6 +2231,12 @@ SCREENS.team = {
     const ts = $('#ts'); rangeStyle(ts); ts.oninput = () => { d.skill = +ts.value; $('#tso').textContent = ts.value; rangeStyle(ts); dirty(); };
     const rerender = () => { p._scroll = scrollY; render(); };
     $('#pickFlag').onclick = () => flagPicker(d.flag, code => { d.flag = code; const c = flagColors(code); if (c) { d.logo.c1 = c[0]; d.logo.c2 = c[1]; } dirty(); rerender(); });
+    $('#crestIn').onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      try { const url = await readCrest(f); const pid = 'cr_' + uid(); await setPhoto(pid, url); d.crest = pid; const c = await imageColors(url); if (c) { d.logo = Object.assign({}, d.logo, { c1: c[0], c2: c[1] }); } dirty(); rerender(); }
+      catch (err) { $('#terr').textContent = 'No se pudo leer esa imagen. Prueba con otra (PNG o JPG).'; }
+    };
+    const crm = $('#crestRm'); if (crm) crm.onclick = () => { delete d.crest; if (d.flag) { const c = flagColors(d.flag); if (c) d.logo = Object.assign({}, d.logo, { c1: c[0], c2: c[1] }); } dirty(); rerender(); };
     $('#editLineup').onclick = () => { p._scroll = scrollY; go('lineupEdit', { draft: d, owner: p }); };
     app().querySelectorAll('[data-pl]').forEach(b => b.onclick = () => playerSheet(p, d.players.find(x => x.id === b.dataset.pl)));
     const add = $('#addPl'); if (add) add.onclick = () => {
@@ -2202,17 +2247,17 @@ SCREENS.team = {
       const inUse = DATA.leagues.filter(l => l.teams.includes(d.id));
       if (inUse.length) { toast(`Está en ${inUse.length === 1 ? 'la liga "' + inUse[0].name + '"' : inUse.length + ' ligas'}. Elimina esas ligas primero.`); return; }
       confirmSheet('Eliminar equipo', `Se borrará "${d.name}" y sus jugadores.`, 'Eliminar', () => {
-        const t = teamById(d.id); if (t) t.players.forEach(pl => pl.photo && delPhoto(pl.photo));
+        const t = teamById(d.id); if (t) { t.players.forEach(pl => pl.photo && delPhoto(pl.photo)); if (t.crest) delPhoto(t.crest); }
         DATA.teams = DATA.teams.filter(t => t.id !== d.id); save(); p.dirty = false; NAV.guard = null; NAV.stack = [{ name: 'teams', params: {} }]; render(); toast('Equipo eliminado');
       });
     };
     $('#saveTeam').onclick = () => {
       d.name = d.name.trim(); d.abbr = (d.abbr || '').trim().toUpperCase(); delete d.sample;
       if (!d.name) { $('#terr').textContent = 'Ponle un nombre al equipo.'; $('#tn').focus(); return; }
-      if (!d.flag) { $('#terr').textContent = 'Elige la bandera del equipo.'; return; }
+      if (!d.flag && !d.crest) { $('#terr').textContent = 'Elige una bandera o sube un escudo para el equipo.'; return; }
       if (!d.abbr) d.abbr = d.name.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ ]/g, '').split(/\s+/).map(w => w[0] || '').join('').slice(0, 3).toUpperCase() || d.name.slice(0, 3).toUpperCase();
       const i = DATA.teams.findIndex(t => t.id === d.id);
-      if (i >= 0) { const old = DATA.teams[i]; old.players.forEach(pl => { if (pl.photo && !d.players.some(x => x.photo === pl.photo)) delPhoto(pl.photo); }); DATA.teams[i] = d; } else DATA.teams.push(d);
+      if (i >= 0) { const old = DATA.teams[i]; old.players.forEach(pl => { if (pl.photo && !d.players.some(x => x.photo === pl.photo)) delPhoto(pl.photo); }); if (old.crest && old.crest !== d.crest) delPhoto(old.crest); DATA.teams[i] = d; } else DATA.teams.push(d);
       save(); p.dirty = false; NAV.guard = null; toast('Equipo guardado'); back();
     };
   },
@@ -2753,7 +2798,7 @@ SCREENS.summary = {
     DATA.teams.forEach(t => { delete t.sample; }); DATA.sample = false;
   }
   // limpiar fotos huérfanas
-  const used = new Set(); DATA.teams.forEach(t => t.players.forEach(p => p.photo && used.add(p.photo)));
+  const used = new Set(); DATA.teams.forEach(t => { if (t.crest) used.add(t.crest); t.players.forEach(p => p.photo && used.add(p.photo)); });
   Object.keys(PHOTOS).forEach(k => { if (!used.has(k)) delPhoto(k); });
   migrateTeams(); DATA.leagues.forEach(l => { migrateLeague(l); progressLeague(l); }); save();
   NAV.stack = [{ name: 'leagues', params: {} }];
