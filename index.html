@@ -539,6 +539,7 @@ const POS_SHORT = { POR: 'POR', DEF: 'DEF', MC: 'MC', DEL: 'DEL' };
 const normPos = p => (p === 'DFC' || p === 'LAT') ? 'DEF' : p === 'CUA' ? 'MC' : p;
 const FORMATIONS = {
   '4-4-2': ['POR', 'DEF', 'DEF', 'DEF', 'DEF', 'MC', 'MC', 'MC', 'MC', 'DEL', 'DEL'],
+  '4-4-2 Rombo': ['POR', 'DEF', 'DEF', 'DEF', 'DEF', 'MCD', 'MC', 'MC', 'MCO', 'DEL', 'DEL'],
   '4-3-3': ['POR', 'DEF', 'DEF', 'DEF', 'DEF', 'MC', 'MC', 'MC', 'DEL', 'DEL', 'DEL'],
   '4-3-3 MCD': ['POR', 'DEF', 'DEF', 'DEF', 'DEF', 'MCD', 'MC', 'MC', 'DEL', 'DEL', 'DEL'],
   '4-3-3 MCO': ['POR', 'DEF', 'DEF', 'DEF', 'DEF', 'MC', 'MC', 'MCO', 'DEL', 'DEL', 'DEL'],
@@ -551,6 +552,7 @@ const FORMATIONS = {
 // Efecto táctico de cada formación (se suma al peso de cada puesto)
 const FORM_MOD = {
   '4-4-2': { att: .98, mid: 1, def: .99, chance: 1, name: 'Equilibrada', desc: 'Dos líneas de cuatro: orden atrás y en el medio' },
+  '4-4-2 Rombo': { att: 1.01, mid: 1.01, def: .97, chance: 1, name: 'Rombo', desc: 'Medio en rombo: manda por el centro, pero deja libres las bandas' },
   '4-3-3': { att: 1.08, mid: 1, def: .99, chance: 1.03, name: 'Ofensiva', desc: 'Tres puntas y tres volantes: más llegada, más espacios atrás' },
   '4-3-3 MCD': { att: 1.03, mid: 1, def: 1.01, chance: 1.02, name: 'Con ancla', desc: 'Un volante de contención protege a la defensa' },
   '4-3-3 MCO': { att: 1.07, mid: 1.02, def: 1, chance: 1.04, name: 'Enganche', desc: 'Un mediapunta suelto entre líneas para asistir' },
@@ -563,10 +565,11 @@ const FORM_MOD = {
 // Ventajas tácticas: cada formación saca ventaja sobre dos y sufre ante otras dos
 const FORM_BEATS = {
   '4-4-2': ['3-4-3', '4-3-3 MCO'],
-  '4-3-3': ['3-5-2', '4-5-1'],
+  '4-4-2 Rombo': ['4-5-1', '4-4-2'],
+  '4-3-3': ['3-5-2', '4-4-2 Rombo'],
   '4-3-3 MCD': ['4-3-3 MCO', '4-3-3'],
   '4-3-3 MCO': ['5-4-1', '5-3-2'],
-  '5-3-2': ['4-3-3', '4-4-2'],
+  '5-3-2': ['4-3-3', '4-4-2 Rombo'],
   '4-5-1': ['4-4-2', '3-5-2'],
   '5-4-1': ['3-4-3', '4-3-3 MCD'],
   '3-4-3': ['4-5-1', '4-3-3 MCD'],
@@ -578,6 +581,7 @@ const DOWN_PEN = 0.04; // por cada jugador de menos respecto al rival
 // coordenadas de cada puesto (x %, y % desde el arco propio abajo)
 const FORM_XY = {
   '4-4-2': [[50, 90], [12, 68], [37, 72], [63, 72], [88, 68], [12, 44], [37, 47], [63, 47], [88, 44], [35, 18], [65, 18]],
+  '4-4-2 Rombo': [[50, 90], [12, 70], [37, 73], [63, 73], [88, 70], [50, 58], [22, 45], [78, 45], [50, 34], [35, 16], [65, 16]],
   '4-3-3': [[50, 90], [12, 68], [37, 72], [63, 72], [88, 68], [24, 47], [50, 51], [76, 47], [16, 21], [50, 15], [84, 21]],
   '4-3-3 MCD': [[50, 90], [12, 68], [37, 72], [63, 72], [88, 68], [50, 57], [27, 42], [73, 42], [16, 19], [50, 14], [84, 19]],
   '4-3-3 MCO': [[50, 90], [12, 68], [37, 72], [63, 72], [88, 68], [28, 52], [72, 52], [50, 36], [16, 20], [50, 13], [84, 20]],
@@ -1770,7 +1774,7 @@ function playerLeagueData(lg, pid) {
   return { pl, team, cur: now, curTM: now ? (cur ? curTeamMatches : now.tm) : curTeamMatches, seasons, tot, name: pl ? pl.name : last ? last.name : '?' };
 }
 
-const APP_VER = '1.8.0';
+const APP_VER = '1.9.0';
 /* ===== Interfaz: navegación y pantallas ===== */
 const NAV = { stack: [], guard: null };
 const app = () => $('#app');
