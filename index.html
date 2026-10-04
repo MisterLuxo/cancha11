@@ -527,6 +527,10 @@ body{background:radial-gradient(900px 420px at 10% -140px,rgba(34,211,107,.20),t
 .crestbox .cb-top{display:flex;align-items:center;gap:12px}
 .crestbox .t1{font-weight:700}.crestbox .t2{font-size:13px;color:var(--muted)}
 .crestbox .cb-acts{display:flex;gap:8px}
+/* nombres de los partidos: local alineado a la derecha, visita a la izquierda */
+.fx .a{justify-content:flex-start;text-align:left}
+.fx .h span{text-align:right}.fx .a span{text-align:left}
+.fx .h .flagi,.fx .a .flagi{flex:none}
 
 </style>
 </head><body><div id="app"></div>
@@ -828,8 +832,9 @@ function playMinute(M) {
 
   // Lesión (poco probable)
   if (R() < INJ_P) {
-    const tt = R() < .5 ? 0 : 1; const c = onField(M, tt);
-    if (c.length) injure(M, c[Math.floor(R() * c.length)]);
+    // cualquiera de los 22 en cancha; el portero tiene menos riesgo
+    const c = [...onField(M, 0), ...onField(M, 1)];
+    if (c.length) injure(M, pick(c, q => slotOf(M, q.pid) === 'POR' ? INJ_GK : 1));
   }
 
   // Deriva del rendimiento
@@ -842,11 +847,14 @@ function playMinute(M) {
   }
 }
 const DRIFT_K = 0.011, DRIFT_C = 0.004;
-const INJ_P = 0.003; // ~1 lesión cada 3-4 partidos
-const INJ_FOUL_P = 0.4; // 40% de las lesiones las provoca una rival
+const INJ_P = 0.0044; // ~0,4 lesiones por partido
+const INJ_FOUL_P = 0.28; // ~28% de las lesiones las provoca un rival con una falta
+const INJ_GK = 0.4; // el portero se lesiona bastante menos
+// duración: 1 partido 45%, 2: 25%, 3: 15%, 4: 10%, 5: 5%
+function injGames() { const r = R(); return r < .45 ? 1 : r < .70 ? 2 : r < .85 ? 3 : r < .95 ? 4 : 5; }
 function injure(M, p) {
   const t = p.team, T = M.teams[t];
-  const games = R() < .6 ? 1 : R() < .75 ? 2 : 3;
+  const games = injGames();
   p.inj = games; bump(p, -0.2);
   const f = T.field.find(x => x.pid === p.pid); if (!f) return;
   const slot = f.slot;
@@ -856,8 +864,8 @@ function injure(M, p) {
   ev(M, { type: 'injury', team: t, pid: p.pid, games, pid2: fouler ? fouler.pid : null });
   if (fouler) {
     M.stats[1 - t].fouls++; bump(fouler, -0.1);
-    // gravedad: 3 partidos casi siempre roja, 2 partidos a veces, 1 partido amarilla
-    const red = games >= 3 ? R() < .75 : games === 2 ? R() < .3 : false;
+    // gravedad: 4-5 partidos casi siempre roja, 3 la mitad, 2 a veces, 1 amarilla
+    const red = games >= 4 ? R() < .75 : games === 3 ? R() < .5 : games === 2 ? R() < .25 : false;
     if (red) sendOff(M, fouler, 'red'); else giveYellow(M, fouler);
   }
   const bench = T.bench.map(id => M.players[id]).filter(b => b && b.minIn === null && !b.out);
@@ -1774,7 +1782,7 @@ function playerLeagueData(lg, pid) {
   return { pl, team, cur: now, curTM: now ? (cur ? curTeamMatches : now.tm) : curTeamMatches, seasons, tot, name: pl ? pl.name : last ? last.name : '?' };
 }
 
-const APP_VER = '1.9.0';
+const APP_VER = '1.9.2';
 /* ===== Interfaz: navegación y pantallas ===== */
 const NAV = { stack: [], guard: null };
 const app = () => $('#app');
