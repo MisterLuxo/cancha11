@@ -531,6 +531,28 @@ body{background:radial-gradient(900px 420px at 10% -140px,rgba(34,211,107,.20),t
 .fx .a{justify-content:flex-start;text-align:left}
 .fx .h span{text-align:right}.fx .a span{text-align:left}
 .fx .h .flagi,.fx .a .flagi{flex:none}
+/* comparar jugadores */
+.cmp-sum{display:grid;grid-template-columns:repeat(4,1fr);padding:12px 6px;text-align:center}
+.cmp-sum small{display:block;font:600 11px/1.2 var(--body);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.cmp-sum b{display:block;font:800 24px/1.1 var(--disp);margin-top:4px}
+.cmp-team{display:flex;align-items:center;gap:10px}
+.cmp-tn{display:flex;justify-content:space-between;gap:8px;font-size:14px}
+.cmp-tn b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cmp-tn span{font-size:12px;flex:none}
+.cmp-bar{position:relative;height:8px;border-radius:4px;background:var(--surface3);margin-top:6px}
+.cmp-bar i{display:block;height:100%;border-radius:4px}
+.cmp-avg{position:absolute;top:-3px;bottom:-3px;width:2px;background:#fff;opacity:.8;border-radius:1px}
+.cmp-num{display:flex;flex-direction:column;align-items:flex-end;min-width:46px}
+.cmp-num b{font:800 20px/1 var(--disp)}
+.cmp-num small{font-size:12px;font-weight:700}
+.cmp-up{color:var(--good)}.cmp-dn{color:var(--bad)}
+.cmp-rk{width:22px;text-align:center;color:var(--faint);font-weight:700;flex:none}
+.cmp-edit{display:flex;align-items:center;justify-content:center;gap:18px;margin:16px 0 6px}
+.cmp-edit output{font:800 44px/1 var(--disp);min-width:80px;text-align:center}
+.cmp-edit .btn{min-width:64px}
+.cmp-seg button{font-size:13px;letter-spacing:.02em;padding:0 4px}
+.cmp-num{width:58px;min-width:58px}
+.cmp-team{display:grid;grid-template-columns:30px minmax(0,1fr) 58px;align-items:center;gap:10px}
+.cmp-tn b{min-width:0}
 
 </style>
 </head><body><div id="app"></div>
@@ -1782,7 +1804,7 @@ function playerLeagueData(lg, pid) {
   return { pl, team, cur: now, curTM: now ? (cur ? curTeamMatches : now.tm) : curTeamMatches, seasons, tot, name: pl ? pl.name : last ? last.name : '?' };
 }
 
-const APP_VER = '1.9.2';
+const APP_VER = '1.10.0';
 /* ===== Interfaz: navegación y pantallas ===== */
 const NAV = { stack: [], guard: null };
 const app = () => $('#app');
@@ -2377,12 +2399,60 @@ function playerSheet(p, pl, num) {
 }
 
 /* ---------- AJUSTES ---------- */
+/* ---------- COMPARAR JUGADORES POR POSICIÓN ---------- */
+const CMP_POS = [['POR', 'Porteros'], ['DEF', 'Defensas'], ['MC', 'Medios'], ['DEL', 'Delanteros']];
+SCREENS.compare = {
+  html(p) {
+    const pos = p.pos || 'POR';
+    const all = []; DATA.teams.forEach(t => t.players.forEach(pl => { if (pl.pos === pos) all.push({ pl, t }); }));
+    all.sort((a, b) => b.pl.skill - a.pl.skill || a.pl.name.localeCompare(b.pl.name, 'es'));
+    const avg = all.length ? all.reduce((s, x) => s + x.pl.skill, 0) / all.length : 0;
+    const teams = DATA.teams.map(t => { const ps = t.players.filter(x => x.pos === pos); return { t, n: ps.length, avg: ps.length ? ps.reduce((s, x) => s + x.skill, 0) / ps.length : 0 }; }).sort((a, b) => b.avg - a.avg);
+    const lo = Math.max(0, Math.min(...teams.filter(x => x.n).map(x => x.avg), avg) - 8), hi = 100;
+    const w = v => Math.max(3, Math.min(100, (v - lo) / (hi - lo) * 100));
+    const sgn = v => (v > 0.05 ? '+' : v < -0.05 ? '−' : '±') + Math.abs(v).toFixed(1).replace('.0', '');
+    const label = (CMP_POS.find(x => x[0] === pos) || [])[1];
+    const teamRows = teams.map(x => `<div class="cmp-team">${crestSVG(x.t, 30)}<div class="grow" style="min-width:0"><div class="cmp-tn"><b>${esc(x.t.name)}</b><span class="muted">${x.n} ${x.n === 1 ? 'jugador' : 'jugadores'}</span></div><div class="cmp-bar"><i style="width:${x.n ? w(x.avg) : 0}%;background:${skillColor(x.avg)}"></i><span class="cmp-avg" style="left:${w(avg)}%"></span></div></div><div class="cmp-num"><b class="num">${x.n ? x.avg.toFixed(1) : '—'}</b><small class="${x.avg - avg >= 0 ? 'cmp-up' : 'cmp-dn'}">${x.n ? sgn(x.avg - avg) : ''}</small></div></div>`).join('');
+    const rows = all.map((x, i) => `<button class="row cmp-row" data-cp="${x.pl.id}" data-ct="${x.t.id}"><span class="cmp-rk num">${i + 1}</span>${avatar(x.pl, 40, x.t)}<div class="grow" style="min-width:0"><div class="t1" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.pl.name)}</div><div class="t2" style="display:flex;align-items:center;gap:6px">${crestSVG(x.t, 16)}<span>${esc(x.t.abbr)}</span><span class="${x.pl.skill - avg >= 0 ? 'cmp-up' : 'cmp-dn'}" style="font-weight:700">${sgn(x.pl.skill - avg)}</span></div></div><span class="skill" style="background:${skillColor(x.pl.skill)}">${x.pl.skill}</span></button>`).join('');
+    return `${topbar('Comparar jugadores')}<main class="content notab">
+      <div class="seg cmp-seg">${CMP_POS.map(([k, l]) => `<button class="${pos === k ? 'on' : ''}" data-cpos="${k}">${l}</button>`).join('')}</div>
+      ${all.length ? `<div class="card cmp-sum"><div><small>Media</small><b class="num">${avg.toFixed(1)}</b></div><div><small>Mejor</small><b class="num">${all[0].pl.skill}</b></div><div><small>Peor</small><b class="num">${all[all.length - 1].pl.skill}</b></div><div><small>${esc(label)}</small><b class="num">${all.length}</b></div></div>
+      <div class="sec-t"><h2>Por equipo</h2><span class="muted" style="font-size:12px">Raya = media general</span></div>
+      <div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:14px">${teamRows}</div>
+      <div class="sec-t"><h2>Ranking</h2><span class="muted" style="font-size:12px">Toca para ajustar</span></div>
+      <div class="card list">${rows}</div>` : `<div class="card" style="padding:18px;text-align:center"><p class="muted" style="margin:0">No hay jugadores en esta posición todavía.</p></div>`}
+    </main>`;
+  },
+  after(p) {
+    const rr = () => { p._scroll = scrollY; render(); };
+    app().querySelectorAll('[data-cpos]').forEach(b => b.onclick = () => { p.pos = b.dataset.cpos; p._scroll = 0; render(); });
+    app().querySelectorAll('[data-cp]').forEach(b => b.onclick = () => {
+      const t = teamById(b.dataset.ct); const pl = t && t.players.find(x => x.id === b.dataset.cp); if (!pl) return;
+      let v = pl.skill;
+      openSheet(`<h3>${esc(pl.name)}</h3><div class="muted" style="display:flex;align-items:center;gap:8px;margin-top:-6px">${crestSVG(t, 20)} ${esc(t.name)} · ${POS[pl.pos]}</div>
+        <div class="cmp-edit"><button class="btn ghost" data-d="-1">−1</button><output id="cv" class="num" style="color:${skillColor(v)}">${v}</output><button class="btn ghost" data-d="1">+1</button></div>
+        <div class="rangewrap"><input type="range" id="cr" min="1" max="100" value="${v}"></div>
+        <div class="acts"><button class="btn ghost" id="cc">Cancelar</button><button class="btn pri" id="cok">Guardar</button></div>`, bg => {
+        const r = $('#cr', bg); rangeStyle(r);
+        const set = n => { v = Math.max(1, Math.min(100, n)); r.value = v; rangeStyle(r); const o = $('#cv', bg); o.textContent = v; o.style.color = skillColor(v); };
+        r.oninput = () => set(+r.value);
+        bg.querySelectorAll('[data-d]').forEach(x => x.onclick = () => set(v + +x.dataset.d));
+        $('#cc', bg).onclick = closeSheet;
+        $('#cok', bg).onclick = () => { if (v !== pl.skill) { pl.skill = v; save(); toast(`${pl.name}: ${v}`); } closeSheet(); rr(); };
+      });
+    });
+  },
+};
 SCREENS.settings = {
   html() {
     const s = DATA.settings;
     return `${topbar('Ajustes', { back: false })}<main class="content">
       <div class="card list">
         <button class="row ${s.vibrate ? 'on' : ''}" id="vib"><div class="grow"><div class="t1">Vibración en los goles</div><div class="t2">El teléfono vibra con cada gol</div></div><span class="chk"></span></button>
+      </div>
+      <div class="sec-t"><h2>Herramientas</h2></div>
+      <div class="card list">
+        <button class="row" id="cmp"><span class="lu-ic">${IC.swap.replace('<svg', '<svg width="22" height="22"')}</span><div class="grow"><div class="t1">Comparar jugadores por posición</div><div class="t2">Niveles de porteros, defensas, medios y delanteros de todos los equipos</div></div>${IC.chev}</button>
       </div>
       <div class="sec-t"><h2>Copia de seguridad</h2></div>
       <div class="card" style="padding:14px;display:flex;flex-direction:column;gap:12px">
@@ -2401,6 +2471,7 @@ SCREENS.settings = {
   },
   after() {
     bindSampleBanner();
+    $('#cmp').onclick = () => go('compare', { pos: 'POR' });
     $('#vib').onclick = () => { DATA.settings.vibrate = !DATA.settings.vibrate; save(); render(); };
     if ($('#exp')) $('#exp').onclick = async () => {
       const blob = new Blob([JSON.stringify({ app: 'cancha11', v: 1, data: DATA, photos: PHOTOS })], { type: 'application/json' });
