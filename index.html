@@ -560,7 +560,7 @@ body{background:radial-gradient(900px 420px at 10% -140px,rgba(34,211,107,.20),t
 .cmp-tn b{min-width:0}
 /* súper tácticas */
 .evt.boost .s{font-style:normal}
-.bchip{max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;line-height:1.2}
+.bchip{max-width:100%;box-sizing:border-box;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;line-height:1.2}
 .bchip svg{vertical-align:-2px;margin-right:3px}
 .taclist{display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow:auto}
 .tacopt{display:flex;align-items:flex-start;gap:12px;padding:12px;border-radius:14px;border:1px solid var(--line);background:var(--card);text-align:left}
@@ -914,7 +914,7 @@ function playMinute(M) {
   const gkD = D.find(p => M.teams[o].field.find(f => f.pid === p.pid).slot === 'POR');
 
   // Falta (puede ser penal)
-  const foulP = CAL.foul;
+  const foulP = CAL.foul * ((M.teams[o].tac && M.teams[o].tac.foul) || 1);
   if (R() < foulP && D.length) {
     const fouler = pick(D, p => W_FOUL[slotOf(M, p.pid)] ?? 1);
     M.stats[o].fouls++; bump(fouler, -0.05);
@@ -930,7 +930,7 @@ function playMinute(M) {
     if (trap === 'caught') { mom = (t === 0 ? -1 : 1) * 0.4; }
     else {
     M.stats[t].shots++; shooter.shots++;
-    const onT = R() < clamp(CAL.onA + CAL.onB * e / 100 + (trap === 'broken' ? .12 : 0), .15, .67);
+    const onT = R() < clamp(CAL.onA + CAL.onB * e / 100 + (trap === 'broken' ? .12 : 0) + ((M.teams[t].tac && M.teams[t].tac.onT) || 0), .15, .75);
     if (onT) {
       M.stats[t].sot++; shooter.sot++;
       const defAvg = S[o].def / CAL.defNorm;
@@ -1200,8 +1200,15 @@ const TACTICS = {
   offside: { name: 'Trampa del Fuera de Juego', kind: 'offside', dur: 10, short: 'La defensa deja en fuera de juego al rival', desc: 'Se activa sola cuando el rival ataca: tres defensores aparecen a la espalda de los delanteros y los dejan en fuera de juego. Queda activa 10 minutos y anula ocasiones rivales; funciona mejor cuanto mejor sea tu defensa frente a la habilidad del atacante, que a veces la lee y la rompe.' },
 };
 const FREEZE_DUR = 5;
+// Impulso Circular: 8 jugadores rodean al rival con el balón, lo arrastran al área y se lo quitan (no se puede cortar).
+// Desventaja: el equipo queda volcado y, si no marca, el rival sale de contraataque.
+const CIRCLE = { onT: .72, finish: .9, counterP: .6, counterOnT: .62, counterFin: .9 };
 const TAC_LIM = { min: -30, max: 50, dmin: 5, dmax: 25 };
 function tacM(M, t, k) { const T = M.teams[t]; return T.tac && T.tac.mult ? T.tac.mult[k] : 1; }
+TACTICS.circular = { name: 'Impulso Circular', kind: 'wave', cut: false, steal: true, counter: true, onT: CIRCLE.onT, finish: CIRCLE.finish, short: 'Rodean al rival, le roban el balón y quedan mano a mano', desc: 'Ocho jugadores corren en círculo alrededor del rival que lleva el balón, forman una masa verde y lo arrastran hasta el área contraria. Ahí le quitan el balón y queda un mano a mano con el portero: no se puede cortar. Pero el equipo queda volcado: si no marca, el rival puede salir de contraataque.' };
+// Virtuoso del Éter: 10 minutos de pases e inteligencia mejorados
+const AETHER = { dur: 10, mult: { att: 1.3, mid: 1.3, def: 1.12 }, onT: .08, foul: .7 };
+TACTICS.eter = { name: 'Virtuoso del Éter', kind: 'buff', dur: AETHER.dur, short: 'Más pases e inteligencia durante 10 minutos', desc: 'Examina todo el campo y guía al equipo con información celestial. Durante 10 minutos el equipo pasa mejor (domina la posesión y crea más ocasiones) y juega más inteligente: elige mejor el remate, se ubica mejor atrás y comete menos faltas.' };
 TACTICS.ax3 = { name: 'Triángulo de las Bermudas', kind: 'freeze', dur: FREEZE_DUR, short: 'Inmoviliza a 3 rivales cercanos', desc: 'AX3: tres pases forman un triángulo en el campo del que nada puede escapar. Los 3 rivales que quedan dentro se quedan inmóviles 5 minutos: no defienden, no atacan y su equipo juega con 3 menos mientras dure.' };
 function validTactic(id) { return typeof id === 'string' && !!TACTICS[id]; }
 // un minuto al azar en cada tiempo (sin descuento)
@@ -1210,7 +1217,7 @@ function tacticTick(M) {
   for (const t of [0, 1]) {
     const T = M.teams[t];
     if (T.tac && M.minute >= T.tac.end) { endTactic(M, t, 'time'); continue; }
-    if (!T.tactic || M.period > 2 || !['wave', 'freeze'].includes(TACTICS[T.tactic].kind)) continue;
+    if (!T.tactic || M.period > 2 || !['wave', 'freeze', 'buff'].includes(TACTICS[T.tactic].kind)) continue;
     const h = M.period - 1;
     if (!T.tacDone[h] && M.minute === T.tacAt[h] && T.field.length) { T.tacDone[h] = true; runTactic(M, t, T.tactic); }
   }
@@ -1219,6 +1226,10 @@ function runTactic(M, t, id) {
   const def = TACTICS[id]; if (!def) return;
   if (def.kind === 'wave') waveTactic(M, t, id, def);
   else if (def.kind === 'freeze') freezeTactic(M, t, id, def);
+  else if (def.kind === 'buff') {
+    M.teams[t].tac = { start: M.minute, end: M.minute + def.dur, name: def.name, kind: 'buff', mult: AETHER.mult, onT: AETHER.onT, foul: AETHER.foul };
+    ev(M, { type: 'tactic', team: t, tid: id, name: def.name });
+  }
 }
 // Triángulo de las Bermudas: atrapa a un rival y a los 2 más cercanos a él
 function freezeTactic(M, t, id, def) {
@@ -1248,6 +1259,10 @@ function waveTactic(M, t, id, def) {
   const ratio = Math.sqrt((S[t].mid * S[t].att) / (S[o].mid * S[o].def));
   const pass = clamp(WAVE.base * Math.pow(ratio, 1.2), .45, .95);
   M.stats[t].poss += 1;
+  if (def.steal) {
+    const vict = D.filter(p => slotOf(M, p.pid) !== 'POR');
+    if (vict.length) { const v = pick(vict, p => (W_MID[slotOf(M, p.pid)] ?? .5) + .2); bump(v, -0.1); ev(M, { type: 'tacticSteal', team: o, pid: v.pid, name: def.name }); }
+  }
   if (def.cut !== false && R() >= pass) {
     const dd = D.filter(p => slotOf(M, p.pid) !== 'POR');
     if (dd.length) { const cut = pick(dd, p => (W_DEF[slotOf(M, p.pid)] ?? .5) * effOf(M, p.pid)); bump(cut, 0.25); ev(M, { type: 'tacticStop', team: o, pid: cut.pid, name: def.name }); }
@@ -1261,7 +1276,7 @@ function waveTactic(M, t, id, def) {
   M.stats[t].shots++; shooter.shots++;
   const gkD = D.find(p => slotOf(M, p.pid) === 'POR');
   const onT = R() < clamp((def.onT ?? .6) + 0.2 * (e - 75) / 100, .4, .9);
-  if (!onT) { bump(shooter, -0.05); ev(M, { type: 'tacticMiss', team: t, pid: shooter.pid, name: def.name }); return; }
+  if (!onT) { bump(shooter, -0.05); ev(M, { type: 'tacticMiss', team: t, pid: shooter.pid, name: def.name }); if (def.counter) counterAttack(M, o, def); return; }
   M.stats[t].sot++; shooter.sot++;
   const gkE = gkD ? effOf(M, gkD.pid) : 20;
   // la defensa queda superada: solo cuenta el portero
@@ -1274,7 +1289,26 @@ function waveTactic(M, t, id, def) {
     if (gkD) { bump(gkD, 0.35); gkD.saves++; M.stats[o].saves++; }
     bump(shooter, 0.05);
     ev(M, { type: 'tacticSave', team: o, pid: gkD ? gkD.pid : null, pid2: shooter.pid, name: def.name });
+    if (def.counter) counterAttack(M, o, def);
   }
+}
+// Contraataque contra un equipo volcado: pocos defensores atrás
+function counterAttack(M, c, def) {
+  if (R() >= CIRCLE.counterP) return;
+  const t = 1 - c; // el equipo que quedó desordenado
+  const A = active(M, c).filter(p => slotOf(M, p.pid) !== 'POR'); if (!A.length) return;
+  const shooter = pick(A, p => (W_SHOOT[slotOf(M, p.pid)] ?? .5) * effOf(M, p.pid));
+  const e = effOf(M, shooter.pid);
+  const gk = active(M, t).find(p => slotOf(M, p.pid) === 'POR');
+  const S = [teamStrength(M, 0), teamStrength(M, 1)];
+  M.stats[c].shots++; shooter.shots++; M.stats[c].poss++;
+  ev(M, { type: 'counter', team: c, pid: shooter.pid, name: def.name });
+  if (R() >= clamp(CIRCLE.counterOnT + 0.2 * (e - 75) / 100, .35, .85)) { bump(shooter, -0.04); return; }
+  M.stats[c].sot++; shooter.sot++;
+  const gkE = gk ? effOf(M, gk.pid) : 20;
+  const pg = clamp(CAL.goal * Math.pow(e / (gkE * 0.7 + 1), 0.75) * Math.pow(S[c].syn / S[t].syn, 0.5) * (FINISH[slotOf(M, shooter.pid)] ?? 1) * CIRCLE.counterFin, .06, .7);
+  if (R() < pg) { goal(M, c, shooter, true, false); const ge = M.events[M.events.length - 1]; if (ge) ge.counter = true; }
+  else if (gk) { bump(gk, 0.2); gk.saves++; M.stats[t].saves++; }
 }
 // Trampa del fuera de juego: situacional. Se activa con la primera ocasión rival de cada tiempo (desde el 5') y dura 15'
 function offsideTrap(M, o, shooter) {
@@ -2023,7 +2057,7 @@ function playerLeagueData(lg, pid) {
   return { pl, team, cur: now, curTM: now ? (cur ? curTeamMatches : now.tm) : curTeamMatches, seasons, tot, name: pl ? pl.name : last ? last.name : '?' };
 }
 
-const APP_VER = '1.16.0';
+const APP_VER = '1.18.0';
 /* ===== Interfaz: navegación y pantallas ===== */
 const NAV = { stack: [], guard: null };
 const app = () => $('#app');
@@ -2969,6 +3003,8 @@ function evHTML(e, info, T, cols) {
     case 'trapBroken': ic = IC.bolt; k = '¡Rompió la trampa!'; cls = 'tacres'; s = 'Leyó la ' + esc(e.name); break;
     case 'tacticMiss': ic = IC.ballMiss; k = 'Remate desviado'; cls = 'tacres'; s = 'Terminó la ' + esc(e.name); break;
     case 'frozen': { ic = IC.shield; k = '¡Atrapados en el triángulo!'; cls = 'tacres'; const ns = (e.pids || []).map(id => esc((info(id) || { name: '?' }).name)); nm = ns.length > 1 ? ns.slice(0, -1).join(', ') + ' y ' + ns[ns.length - 1] : (ns[0] || ''); s = `Inmóviles ${e.dur || 5} minutos · ${esc(e.name)}`; break; }
+    case 'tacticSteal': ic = IC.bolt; k = '¡Le robaron el balón!'; cls = 'tacres'; s = 'Rodeado por el ' + esc(e.name); break;
+    case 'counter': ic = IC.boot; k = '¡Contraataque!'; cls = 'tacres'; s = 'El rival quedó volcado tras el ' + esc(e.name); break;
     case 'tacticEnd': ic = IC.bolt; cls = 'boostend'; k = 'Termina la súper táctica'; nm = esc(e.name); break;
     case 'injury': ic = IC.inj; k = 'Lesión'; s = 'Baja: ' + e.games + (e.games === 1 ? ' partido' : ' partidos') + (p2 ? ' · Falta de ' + esc(p2.name) : ''); break;
     case 'sub': ic = IC.sub; k = 'Cambio'; nm = 'Entra: ' + esc(p.name); s = p2 ? 'Sale: ' + esc(p2.name) : ''; break;
@@ -2977,9 +3013,10 @@ function evHTML(e, info, T, cols) {
   }
   if (['goal', 'penGoal'].includes(e.type) && e.sc) s = (s ? s + ' · ' : '') + `${e.sc[0]}-${e.sc[1]}`;
   if (e.tac) s = (s ? s + ' · ' : '') + `<span style="color:var(--gold);font-weight:700">${esc(e.tac)}</span>`;
+  if (e.counter) s = (s ? s + ' · ' : '') + `<span style="color:var(--accent2);font-weight:700">De contraataque</span>`;
   const side = e.team === 0 ? 'h' : 'a';
   const minute = ['soGoal', 'soMiss'].includes(e.type) ? 'PEN' : e.disp + "'";
-  const showAv = ['goal', 'penGoal', 'penMiss', 'sub', 'soGoal', 'soMiss', 'red', 'second', 'injury', 'boost', 'tacticStop', 'tacticSave', 'tacticMiss', 'trapBroken'].includes(e.type) && !!e.pid;
+  const showAv = ['goal', 'penGoal', 'penMiss', 'sub', 'soGoal', 'soMiss', 'red', 'second', 'injury', 'boost', 'tacticStop', 'tacticSave', 'tacticMiss', 'trapBroken', 'tacticSteal', 'counter'].includes(e.type) && !!e.pid;
   return `<div class="evt ${side} ${cls}"><span class="m">${minute}</span><i class="tb" style="background:${cols ? cols[e.team] : 'var(--line)'}"></i><div class="box"><span class="ic">${ic}</span>${showAv ? avatar(p, 36, team) : e.type === 'tactic' && team ? crestSVG(team, 36) : ''}<div class="tx"><div class="k">${k}</div><div class="p">${nm}</div>${s ? `<div class="s">${s}</div>` : ''}</div></div></div>`;
 }
 function momHTML(vals, per, goals, cols, live) {
