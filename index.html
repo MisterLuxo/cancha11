@@ -553,6 +553,15 @@ body{background:radial-gradient(900px 420px at 10% -140px,rgba(34,211,107,.20),t
 .cmp-num{width:58px;min-width:58px}
 .cmp-team{display:grid;grid-template-columns:30px minmax(0,1fr) 58px;align-items:center;gap:10px}
 .cmp-tn b{min-width:0}
+/* súper tácticas */
+.evt.boost .s{font-style:normal}
+.bchip{max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;line-height:1.2}
+.bchip svg{vertical-align:-2px;margin-right:3px}
+.taclist{display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow:auto}
+.tacopt{display:flex;align-items:flex-start;gap:12px;padding:12px;border-radius:14px;border:1px solid var(--line);background:var(--card);text-align:left}
+.tacopt.on{border-color:var(--gold);background:rgba(255,201,64,.08)}
+.tacopt .t1{font-weight:700}.tacopt .t2{font-size:13px;color:var(--muted);margin-top:2px;line-height:1.35}
+.evt.tacres .k{color:var(--gold)}
 
 </style>
 </head><body><div id="app"></div>
@@ -754,7 +763,8 @@ function teamStrength(M, t) {
   // inferioridad numérica: además de perder a la jugadora, el equipo se desordena un poco
   const down = Math.max(0, M.teams[1 - t].field.length - T.field.length);
   const nf = 1 - DOWN_PEN * down;
-  const bo = T.boost ? BOOST : { att: 1, mid: 1, def: 1 };
+  const bo0 = T.boost ? BOOST : { att: 1, mid: 1, def: 1 };
+  const bo = bo0;
   return { att: att * syn * fm.att * e.att * nf * bo.att + 1, mid: mid * syn * fm.mid * e.mid * nf * bo.mid + 1, def: def * syn * fm.def * e.def * nf * bo.def + 1, gk: gk * (0.9 + 0.2 * T.skill / 100), syn, chance: fm.chance };
 }
 function effOf(M, pid) {
@@ -775,7 +785,7 @@ function createMatch(home, away, lineups, opts = {}) {
     const L = lineups[t];
     M.teams.push({
       id: team.id, name: team.name, abbr: team.abbr, skill: team.skill || 50, formation: L.formation,
-      captain: team.captain || null, field: L.field.filter(f => f.pid).map(f => ({ pid: f.pid, slot: f.slot })), bench: L.bench.slice(), subsLeft: SUBS_MAX, windowsLeft: WINDOWS_MAX, lastWin: null,
+      captain: team.captain || null, tactic: validTactic(team.tactic) ? team.tactic : null, tacAt: tacticMinutes(), tacDone: [false, false], field: L.field.filter(f => f.pid).map(f => ({ pid: f.pid, slot: f.slot })), bench: L.bench.slice(), subsLeft: SUBS_MAX, windowsLeft: WINDOWS_MAX, lastWin: null,
     });
     for (const p of team.players) {
       M.players[p.id] = {
@@ -807,12 +817,14 @@ const CAL = { chance: .29, foul: .24, pen: .012, yellow: .165, red: .0015, onA: 
 function playMinute(M) {
   const S = [teamStrength(M, 0), teamStrength(M, 1)];
   const homeAdv = M.neutral ? 1 : 1.08;
-  const m0 = Math.pow(S[0].mid * homeAdv, 1.1), m1 = Math.pow(S[1].mid, 1.1);
+  const m0 = Math.pow(S[0].mid * homeAdv, 1.1) * Math.pow(tacM(M, 0, 'mid'), 1.5), m1 = Math.pow(S[1].mid, 1.1) * Math.pow(tacM(M, 1, 'mid'), 1.5);
   const pHome = clamp(m0 / (m0 + m1), .28, .72);
   const t = R() < pHome ? 0 : 1, o = 1 - t;
   M.stats[t].poss++;
   const ratio = S[t].att / S[o].def;
-  const pChance = clamp(CAL.chance * Math.pow(ratio, 0.65) * (S[t].chance || 1) * (t === 0 && !M.neutral ? 1.07 : 1), .05, .55);
+  // súper táctica: el ataque propio multiplica las ocasiones; la defensa rival las reduce
+  const tacR = tacM(M, t, 'att') / tacM(M, o, 'def');
+  const pChance = clamp(CAL.chance * Math.pow(ratio, 0.65) * (S[t].chance || 1) * (t === 0 && !M.neutral ? 1.07 : 1) * tacR, .05, .7);
   let mom = (t === 0 ? 1 : -1) * (0.15 + 0.35 * R() * pChance / CAL.chance);
   const A = onField(M, t), D = onField(M, o);
   const gkD = D.find(p => M.teams[o].field.find(f => f.pid === p.pid).slot === 'POR');
@@ -830,13 +842,16 @@ function playMinute(M) {
     mom = (t === 0 ? 1 : -1) * (0.55 + 0.3 * R());
     const shooter = pick(A, p => (W_SHOOT[slotOf(M, p.pid)] ?? .5) * effOf(M, p.pid));
     const e = effOf(M, shooter.pid);
+    const trap = offsideTrap(M, o, shooter);
+    if (trap === 'caught') { mom = (t === 0 ? -1 : 1) * 0.4; }
+    else {
     M.stats[t].shots++; shooter.shots++;
-    const onT = R() < clamp(CAL.onA + CAL.onB * e / 100, .15, .55);
+    const onT = R() < clamp(CAL.onA + CAL.onB * e / 100 + (trap === 'broken' ? .12 : 0), .15, .67);
     if (onT) {
       M.stats[t].sot++; shooter.sot++;
       const defAvg = S[o].def / CAL.defNorm;
       const gkE = gkD ? effOf(M, gkD.pid) : 20;
-      const pg = clamp(CAL.goal * Math.pow(e / (gkE * 0.7 + defAvg * 0.72 * 0.3 + 1), 0.75) * Math.pow(S[t].syn / S[o].syn, 0.5) * (FINISH[slotOf(M, shooter.pid)] ?? 1), .06, .65);
+      const pg = clamp(CAL.goal * Math.pow(e / (gkE * 0.7 + defAvg * 0.72 * 0.3 + 1), 0.75) * Math.pow(S[t].syn / S[o].syn, 0.5) * (FINISH[slotOf(M, shooter.pid)] ?? 1) * Math.sqrt(tacR), .06, .7);
       if (R() < pg) {
         goal(M, t, shooter, true, false);
         mom = (t === 0 ? 1 : -1);
@@ -848,6 +863,7 @@ function playMinute(M) {
     } else {
       bump(shooter, -0.04); defCredit(M, D, 0.08);
       if (R() < CAL.cornMiss) M.stats[t].corners++;
+    }
     }
   }
   M.momentum.push({ m: M.minute, p: M.period, v: clamp(mom, -1, 1) });
@@ -1074,7 +1090,7 @@ function step(M) {
   }
   if (M.minute >= end + M.added[M.period - 1]) {
     M._addAnnounced = false;
-    [0, 1].forEach(t => { if (M.teams[t].boost) endBoost(M, t, 'time'); });
+    [0, 1].forEach(t => { if (M.teams[t].boost) endBoost(M, t, 'time'); if (M.teams[t].tac) endTactic(M, t, 'period'); });
     if (M.period === 1) { M.phase = 'ht'; ev(M, { type: 'ht' }); return M._new; }
     if (M.period === 3) { M.phase = 'etHt'; ev(M, { type: 'etHt' }); return M._new; }
     if (M.period === 2 || M.period === 4) {
@@ -1089,7 +1105,99 @@ function step(M) {
   M._goalBy = null;
   playMinute(M);
   autoSubs(M);
+  tacticTick(M);
   return M._new;
+}
+/* ===== Súper tácticas (catálogo). Cada equipo tiene una; se puede activar una vez en cada tiempo ===== */
+const TACTICS = {
+  amazonas: { name: 'Ola del Amazonas', kind: 'wave', cut: true, onT: .6, finish: .95, short: 'Atraviesa el medio y la defensa rival', desc: 'Una ola gigante arrasa el campo rival: unos jugadores bajan y otros suben, el equipo atraviesa el mediocampo y la defensa y llega con una ocasión clara. El rival puede contenerla si su medio y su defensa son fuertes.' },
+  trueno: { name: 'Trueno Oscuro', kind: 'wave', cut: false, onT: .7, finish: .66, short: 'Detiene el tiempo del rival: mano a mano con el portero', desc: 'Una nube púrpura lanza rayos que congelan el tiempo de todo el equipo rival. El delantero avanza libre y el tiempo se reanuda cuando queda solo frente al portero. No se puede cortar: solo el portero puede evitar el gol.' },
+  offside: { name: 'Trampa del Fuera de Juego', kind: 'offside', dur: 15, short: 'La defensa deja en fuera de juego al rival', desc: 'Se activa sola cuando el rival ataca: tres defensores aparecen a la espalda de los delanteros y los dejan en fuera de juego. Queda activa 15 minutos y anula ocasiones rivales; funciona mejor cuanto mejor sea tu defensa frente a la habilidad del atacante, que a veces la lee y la rompe.' },
+};
+const TAC_LIM = { min: -30, max: 50, dmin: 5, dmax: 25 };
+function tacM(M, t, k) { const T = M.teams[t]; return T.tac && T.tac.mult ? T.tac.mult[k] : 1; }
+function validTactic(id) { return typeof id === 'string' && !!TACTICS[id]; }
+// un minuto al azar en cada tiempo (sin descuento)
+function tacticMinutes() { return [3 + Math.floor(R() * 40), 48 + Math.floor(R() * 40)]; }
+function tacticTick(M) {
+  for (const t of [0, 1]) {
+    const T = M.teams[t];
+    if (T.tac && M.minute >= T.tac.end) { endTactic(M, t, 'time'); continue; }
+    if (!T.tactic || M.period > 2 || TACTICS[T.tactic].kind !== 'wave') continue;
+    const h = M.period - 1;
+    if (!T.tacDone[h] && M.minute === T.tacAt[h] && T.field.length) { T.tacDone[h] = true; runTactic(M, t, T.tactic); }
+  }
+}
+function runTactic(M, t, id) {
+  const def = TACTICS[id]; if (!def) return;
+  if (def.kind === 'wave') waveTactic(M, t, id, def);
+}
+const WAVE = { base: .72 };
+// Ola: una jugada colectiva que rompe líneas y termina en una ocasión clara (o la corta el rival)
+function waveTactic(M, t, id, def) {
+  const o = 1 - t; const S = [teamStrength(M, 0), teamStrength(M, 1)];
+  ev(M, { type: 'tactic', team: t, tid: id, name: def.name });
+  const A = onField(M, t).filter(p => slotOf(M, p.pid) !== 'POR'), D = onField(M, o);
+  if (!A.length) return;
+  const ratio = Math.sqrt((S[t].mid * S[t].att) / (S[o].mid * S[o].def));
+  const pass = clamp(WAVE.base * Math.pow(ratio, 1.2), .45, .95);
+  M.stats[t].poss += 1;
+  if (def.cut !== false && R() >= pass) {
+    const dd = D.filter(p => slotOf(M, p.pid) !== 'POR');
+    if (dd.length) { const cut = pick(dd, p => (W_DEF[slotOf(M, p.pid)] ?? .5) * effOf(M, p.pid)); bump(cut, 0.25); ev(M, { type: 'tacticStop', team: o, pid: cut.pid, name: def.name }); }
+    return;
+  }
+  // mano a mano: remata siempre el delantero en cancha con más habilidad
+  const best = arr => arr.reduce((x, y) => (effOf(M, y.pid) > effOf(M, x.pid) ? y : x));
+  const dels = A.filter(p => slotOf(M, p.pid) === 'DEL'), natDel = A.filter(p => p.pos === 'DEL');
+  const shooter = dels.length ? best(dels) : natDel.length ? best(natDel) : pick(A, p => (W_SHOOT[slotOf(M, p.pid)] ?? .5) * effOf(M, p.pid));
+  const e = effOf(M, shooter.pid);
+  M.stats[t].shots++; shooter.shots++;
+  const gkD = D.find(p => slotOf(M, p.pid) === 'POR');
+  const onT = R() < clamp((def.onT ?? .6) + 0.2 * (e - 75) / 100, .4, .9);
+  if (!onT) { bump(shooter, -0.05); ev(M, { type: 'tacticMiss', team: t, pid: shooter.pid, name: def.name }); return; }
+  M.stats[t].sot++; shooter.sot++;
+  const gkE = gkD ? effOf(M, gkD.pid) : 20;
+  // la defensa queda superada: solo cuenta el portero
+  const pg = clamp(CAL.goal * Math.pow(e / (gkE * 0.7 + 1), 0.75) * Math.pow(S[t].syn / S[o].syn, 0.5) * (FINISH[slotOf(M, shooter.pid)] ?? 1) * (def.finish ?? 1), .08, .8);
+  if (R() < pg) {
+    goal(M, t, shooter, true, false);
+    const ge = M.events[M.events.length - 1]; if (ge) ge.tac = def.name;
+    for (const p of onField(M, t)) bump(p, 0.05); // mérito colectivo
+  } else {
+    if (gkD) { bump(gkD, 0.35); gkD.saves++; M.stats[o].saves++; }
+    bump(shooter, 0.05);
+    ev(M, { type: 'tacticSave', team: o, pid: gkD ? gkD.pid : null, pid2: shooter.pid, name: def.name });
+  }
+}
+// Trampa del fuera de juego: situacional. Se activa con la primera ocasión rival de cada tiempo (desde el 5') y dura 15'
+function offsideTrap(M, o, shooter) {
+  const T = M.teams[o]; const def = TACTICS[T.tactic];
+  if (!def || def.kind !== 'offside' || M.period > 2) return null;
+  const h = M.period - 1;
+  if (!(T.tac && T.tac.kind === 'offside')) {
+    if (T.tacDone[h] || M.minute < 5) return null;
+    T.tacDone[h] = true; T.tac = { start: M.minute, end: M.minute + def.dur, name: def.name, kind: 'offside' };
+    ev(M, { type: 'tactic', team: o, tid: T.tactic, name: def.name });
+  }
+  // la "lectura" del atacante: su habilidad contra la media de la defensa
+  const defs = onField(M, o).filter(p => slotOf(M, p.pid) === 'DEF');
+  const dAvg = defs.length ? defs.reduce((a, p) => a + effOf(M, p.pid), 0) / defs.length : 40;
+  const pOk = clamp(.7 + 1.2 * (dAvg - effOf(M, shooter.pid)) / 100, .4, .9);
+  if (R() < pOk) {
+    bump(shooter, -0.05); defs.forEach(p => bump(p, 0.04));
+    if (defs.length) bump(defs[Math.floor(R() * defs.length)], 0.06);
+    M.stats[1 - o].offsides = (M.stats[1 - o].offsides || 0) + 1;
+    ev(M, { type: 'offside', team: o, pid: shooter.pid, name: def.name });
+    return 'caught';
+  }
+  ev(M, { type: 'trapBroken', team: 1 - o, pid: shooter.pid, name: def.name });
+  return 'broken';
+}
+function endTactic(M, t, why) {
+  const T = M.teams[t]; if (!T.tac) return;
+  ev(M, { type: 'tacticEnd', team: t, name: T.tac.name, why });
+  T.tac = null;
 }
 /* ===== Arenga de la capitana ===== */
 const BOOST = { att: 1.20, mid: 1.10, def: 1.10 }; // +10% general, +20% en ataque
@@ -1583,7 +1691,7 @@ function createLeague(name, type, teamIds) {
 function migrateLeague(lg) {
   // temporada ya cerrada pero aún sin registro por jugadora: se completa con los partidos que siguen guardados
   if (lg.history && lg.history.length) { const h = lg.history[lg.history.length - 1]; if (!h.players && h.n === lg.season && lg.fixtures.some(f => f.res)) h.players = seasonPlayers(lg.fixtures); } if (lg.type === 'po' && !lg.hbal) { balanceHome(lg.fixtures || []); lg.hbal = 1; } if (!lg.season) lg.season = 1; if (!lg.history) lg.history = []; if (!lg.out) lg.out = {}; (lg.fixtures || []).forEach(f => f.res && f.res.lines.forEach(l => { l.pos = normPos(l.pos); })); }
-function migrateTeams() { DATA.teams.forEach(t => { t.players.forEach(p => { p.pos = normPos(p.pos); }); if (t.flag && !t.crest && typeof document !== 'undefined') { const c = flagColors(t.flag); if (c) t.logo = Object.assign({}, t.logo, { c1: c[0], c2: c[1] }); } if (t.formation) { if (FORMATIONS[t.formation] && !t.lineup && t.players.length) { const L = bestLineupFor(t.players, t.formation); t.lineup = { formation: L.formation, field: L.field.map(f => f.pid), bench: L.bench }; } delete t.formation; } if (t.lineup && !validPref(t.lineup)) delete t.lineup; }); }
+function migrateTeams() { DATA.teams.forEach(t => { t.players.forEach(p => { p.pos = normPos(p.pos); }); if (t.flag && !t.crest && typeof document !== 'undefined') { const c = flagColors(t.flag); if (c) t.logo = Object.assign({}, t.logo, { c1: c[0], c2: c[1] }); } if (t.tactic && !validTactic(t.tactic)) delete t.tactic; if (t.formation) { if (FORMATIONS[t.formation] && !t.lineup && t.players.length) { const L = bestLineupFor(t.players, t.formation); t.lineup = { formation: L.formation, field: L.field.map(f => f.pid), bench: L.bench }; } delete t.formation; } if (t.lineup && !validPref(t.lineup)) delete t.lineup; }); }
 function teamSnap(id) { const t = teamById(id); return t ? { id, name: t.name, abbr: t.abbr, logo: t.logo, flag: t.flag, crest: t.crest } : { id, name: '—', abbr: '—' }; }
 function runnerUpId(lg) {
   if (!lg.champion) return null;
@@ -1804,7 +1912,7 @@ function playerLeagueData(lg, pid) {
   return { pl, team, cur: now, curTM: now ? (cur ? curTeamMatches : now.tm) : curTeamMatches, seasons, tot, name: pl ? pl.name : last ? last.name : '?' };
 }
 
-const APP_VER = '1.10.0';
+const APP_VER = '1.14.0';
 /* ===== Interfaz: navegación y pantallas ===== */
 const NAV = { stack: [], guard: null };
 const app = () => $('#app');
@@ -2246,6 +2354,7 @@ SCREENS.team = {
       <div class="field"><label for="ta">Abreviatura</label><input class="inp" id="ta" maxlength="3" value="${esc(d.abbr)}" placeholder="AND" style="text-transform:uppercase"></div></div>
       <div class="field"><span class="flabel">Bandera</span><button class="row flagbtn" id="pickFlag" type="button">${d.flag ? `<span class="flagi" style="width:40px;height:40px;font-size:32px">${flagEmoji(d.flag)}</span><div class="grow"><div class="t1">${esc(flagName(d.flag))}</div><div class="t2">Toca para cambiarla</div></div>` : `<span class="flagi" style="width:40px;height:40px;font-size:32px;opacity:.5">${flagEmoji(null)}</span><div class="grow"><div class="t1">Elegir bandera</div><div class="t2">Será el ícono del equipo</div></div>`}${IC.chev}</button></div>
       <div class="field"><span class="flabel">Escudo <span style="text-transform:none;letter-spacing:0;color:var(--faint)">(opcional)</span></span><div class="crestbox"><div class="cb-top">${d.crest && PHOTOS[d.crest] ? `<span class="flagi crestimg" style="width:44px;height:44px"><img src="${PHOTOS[d.crest]}" alt=""></span>` : `<span class="lu-ic">${IC.shield.replace('<svg', '<svg width="22" height="22"')}</span>`}<div class="grow"><div class="t1">${d.crest ? 'Escudo cargado' : 'Sin escudo'}</div><div class="t2">${d.crest ? 'Se usa como ícono en vez de la bandera y da los colores del equipo.' : 'Si subes una imagen, se usa como ícono en vez de la bandera. PNG con fondo transparente queda mejor.'}</div></div></div><div class="cb-acts"><label class="btn sm ghost" style="cursor:pointer;flex:1">${d.crest ? 'Cambiar' : 'Subir imagen'}<input type="file" id="crestIn" accept="image/*" hidden></label>${d.crest ? '<button class="btn sm ghost" id="crestRm" style="color:var(--rc);flex:1">Quitar</button>' : ''}</div></div></div>
+      <div class="field"><span class="flabel">Súper táctica</span><button class="row flagbtn" id="editTac" type="button"><span class="lu-ic" style="color:var(--gold);background:rgba(255,201,64,.12)">${IC.bolt.replace('<svg', '<svg width="22" height="22"')}</span><div class="grow"><div class="t1">${validTactic(d.tactic) ? esc(TACTICS[d.tactic].name) : 'Sin súper táctica'}</div><div class="t2">${validTactic(d.tactic) ? esc(TACTICS[d.tactic].short) + ' · una vez por tiempo' : 'Toca para elegir la táctica del equipo'}</div></div>${IC.chev}</button></div>
       <div class="field"><span class="flabel">Alineación predeterminada</span><button class="row flagbtn" id="editLineup" type="button"><span class="lu-ic">${IC.shirt.replace('<svg', '<svg width="24" height="24"')}</span><div class="grow"><div class="t1">${validPref(d.lineup) ? `${d.lineup.formation} · ${FORM_MOD[d.lineup.formation].name}` : 'Automática'}</div><div class="t2">${validPref(d.lineup) ? 'Titulares y suplentes fijos. Si falta alguien, entra el mejor disponible' : 'Cada partido se arma la mejor alineación posible'}</div></div>${IC.chev}</button></div>
       <div class="field"><label for="ts">Sinergia del equipo</label><div class="rangewrap"><input type="range" id="ts" min="1" max="100" value="${d.skill}"><output id="tso" class="num">${d.skill}</output></div><span class="muted" style="font-size:13px">Qué tan bien juegan juntos. Multiplica el rendimiento de todo el equipo.</span></div>
       <div class="sec-t"><h2>Plantilla</h2><span class="muted num" ${d.players.length > SQUAD ? 'style="color:var(--bad)"' : ''}>${d.players.length}/${SQUAD}</span></div>${d.players.length > SQUAD ? `<div class="banner" style="background:rgba(242,104,61,.12);border-color:rgba(242,104,61,.4)"><div class="grow">Sobran <b>${d.players.length - SQUAD}</b> jugadores: el plantel es de ${SQUAD} (11 + 5). Toca a un jugador y usa <b>Quitar</b>. Mientras tanto, a los partidos van los ${SQUAD} mejores.</div></div>` : ''}
@@ -2271,6 +2380,7 @@ SCREENS.team = {
       catch (err) { $('#terr').textContent = 'No se pudo leer esa imagen. Prueba con otra (PNG o JPG).'; }
     };
     const crm = $('#crestRm'); if (crm) crm.onclick = () => { delete d.crest; if (d.flag) { const c = flagColors(d.flag); if (c) d.logo = Object.assign({}, d.logo, { c1: c[0], c2: c[1] }); } dirty(); rerender(); };
+    $('#editTac').onclick = () => tacticSheet(d, () => { dirty(); rerender(); });
     $('#editLineup').onclick = () => { p._scroll = scrollY; go('lineupEdit', { draft: d, owner: p }); };
     app().querySelectorAll('[data-pl]').forEach(b => b.onclick = () => playerSheet(p, d.players.find(x => x.id === b.dataset.pl)));
     const add = $('#addPl'); if (add) add.onclick = () => {
@@ -2349,6 +2459,13 @@ SCREENS.lineupEdit = {
     const cl = $('#clearL'); if (cl) cl.onclick = () => { delete d.lineup; if (p.owner) p.owner.dirty = true; toast('Alineación automática'); back(); };
   },
 };
+function tacticSheet(d, done) {
+  const opt = (id, name, desc) => `<button class="tacopt ${(d.tactic || '') === id ? 'on' : ''}" data-tac="${id}"><span class="lu-ic" style="color:var(--gold);background:rgba(255,201,64,.12)">${IC.bolt.replace('<svg', '<svg width="20" height="20"')}</span><div class="grow"><div class="t1">${esc(name)}</div><div class="t2">${esc(desc)}</div></div></button>`;
+  openSheet(`<h3>Súper táctica</h3><p class="muted" style="font-size:13px;margin:-4px 0 8px">Cada súper táctica se puede activar una vez en cada tiempo.</p>
+    <div class="taclist">${Object.entries(TACTICS).map(([id, t]) => opt(id, t.name, t.desc)).join('')}${opt('', 'Sin súper táctica', 'El equipo juega sin táctica especial.')}</div>`, bg => {
+    bg.querySelectorAll('[data-tac]').forEach(b => b.onclick = () => { if (b.dataset.tac) d.tactic = b.dataset.tac; else delete d.tactic; closeSheet(); done(); });
+  });
+}
 function flagPicker(cur, onPick) {
   const list = flagList();
   const rows = q => { const nq = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); const k = nq(q || ''); return list.filter(f => !k || nq(f.n).includes(k) || f.c.toLowerCase() === k).map(f => `<button class="flagopt ${f.c === cur ? 'on' : ''}" data-fl="${f.c}"><span class="flagi" style="width:34px;height:34px;font-size:28px">${flagEmoji(f.c)}</span><span class="fn">${esc(f.n)}</span></button>`).join('') || '<p class="muted" style="text-align:center">Sin resultados</p>'; };
@@ -2639,7 +2756,7 @@ SCREENS.prematch = {
     app().querySelectorAll('[data-f]').forEach(b => b.onclick = () => tap('f', +b.dataset.f));
     app().querySelectorAll('[data-b]').forEach(b => b.onclick = () => tap('b', +b.dataset.b));
     $('#kick').onclick = () => {
-      const snapTeams = T.map(t => ({ id: t.id, name: t.name, abbr: t.abbr, skill: t.skill, captain: t.captain || null, players: t.players.map(pl => Object.assign({}, pl)) }));
+      const snapTeams = T.map(t => ({ id: t.id, name: t.name, abbr: t.abbr, skill: t.skill, captain: t.captain || null, tactic: t.tactic || null, players: t.players.map(pl => Object.assign({}, pl)) }));
       [0, 1].forEach(k => saveLineup(lg, T[k], p.lineups[k], p.repl[k])); save();
       const M = createMatch(snapTeams[0], snapTeams[1], p.lineups, { knockout: f.stage === 'F', neutral: isNeutral(lg, f) });
       LIVE = { M, lg: lg.id, fx: f.id, speed: 1, timer: null, saved: false };
@@ -2669,16 +2786,24 @@ function evHTML(e, info, T, cols) {
     case 'red': ic = IC.rc; k = 'Tarjeta roja'; s = 'Expulsado'; break;
     case 'boost': { ic = IC.bolt; k = '¡Arenga del capitán!'; cls = 'boost'; const why = { comeback: 'Para remontar', seal: 'Para sentenciar', down: 'Con una menos' }[e.reason] || ''; s = (e.phrase ? '“' + esc(e.phrase) + '”<br>' : '') + why + ' · ' + e.dur + ' min'; break; }
     case 'boostEnd': ic = IC.bolt; cls = 'boostend'; k = e.why === 'goal' ? '¡Arenga cumplida!' : e.why === 'out' ? 'Arenga interrumpida' : 'Se acabó el impulso'; nm = e.why === 'goal' ? 'El capitán suma nota' : e.why === 'out' ? 'El capitán dejó la cancha' : 'Pasaron los 10 minutos'; break;
+    case 'tactic': ic = IC.bolt; k = '¡Súper táctica!'; cls = 'boost'; nm = esc(e.name); s = TACTICS[e.tid] ? TACTICS[e.tid].short : ''; break;
+    case 'tacticStop': ic = IC.shield; k = '¡Táctica contenida!'; cls = 'tacres'; s = 'Cortó: ' + esc(e.name); break;
+    case 'tacticSave': ic = IC.shield; k = '¡Atajada!'; cls = 'tacres'; s = (p2 ? 'Remató ' + esc(p2.name) + ' · ' : '') + esc(e.name); break;
+    case 'offside': ic = IC.shield; k = '¡Fuera de juego!'; cls = 'tacres'; nm = esc(e.name); s = 'Atrapado: ' + esc(p.name); break;
+    case 'trapBroken': ic = IC.bolt; k = '¡Rompió la trampa!'; cls = 'tacres'; s = 'Leyó la ' + esc(e.name); break;
+    case 'tacticMiss': ic = IC.ballMiss; k = 'Remate desviado'; cls = 'tacres'; s = 'Terminó la ' + esc(e.name); break;
+    case 'tacticEnd': ic = IC.bolt; cls = 'boostend'; k = 'Termina la súper táctica'; nm = esc(e.name); break;
     case 'injury': ic = IC.inj; k = 'Lesión'; s = 'Baja: ' + e.games + (e.games === 1 ? ' partido' : ' partidos') + (p2 ? ' · Falta de ' + esc(p2.name) : ''); break;
     case 'sub': ic = IC.sub; k = 'Cambio'; nm = 'Entra: ' + esc(p.name); s = p2 ? 'Sale: ' + esc(p2.name) : ''; break;
     case 'soGoal': ic = IC.ball; k = 'Anota'; s = `Tanda ${e.so[0]}-${e.so[1]}`; break;
     case 'soMiss': ic = IC.ballMiss; k = 'Falla'; s = `Tanda ${e.so[0]}-${e.so[1]}`; break;
   }
   if (['goal', 'penGoal'].includes(e.type) && e.sc) s = (s ? s + ' · ' : '') + `${e.sc[0]}-${e.sc[1]}`;
+  if (e.tac) s = (s ? s + ' · ' : '') + `<span style="color:var(--gold);font-weight:700">${esc(e.tac)}</span>`;
   const side = e.team === 0 ? 'h' : 'a';
   const minute = ['soGoal', 'soMiss'].includes(e.type) ? 'PEN' : e.disp + "'";
-  const showAv = ['goal', 'penGoal', 'penMiss', 'sub', 'soGoal', 'soMiss', 'red', 'second', 'injury', 'boost'].includes(e.type);
-  return `<div class="evt ${side} ${cls}"><span class="m">${minute}</span><i class="tb" style="background:${cols ? cols[e.team] : 'var(--line)'}"></i><div class="box"><span class="ic">${ic}</span>${showAv ? avatar(p, 36, team) : ''}<div class="tx"><div class="k">${k}</div><div class="p">${nm}</div>${s ? `<div class="s">${s}</div>` : ''}</div></div></div>`;
+  const showAv = ['goal', 'penGoal', 'penMiss', 'sub', 'soGoal', 'soMiss', 'red', 'second', 'injury', 'boost', 'tacticStop', 'tacticSave', 'tacticMiss', 'trapBroken'].includes(e.type) && !!e.pid;
+  return `<div class="evt ${side} ${cls}"><span class="m">${minute}</span><i class="tb" style="background:${cols ? cols[e.team] : 'var(--line)'}"></i><div class="box"><span class="ic">${ic}</span>${showAv ? avatar(p, 36, team) : e.type === 'tactic' && team ? crestSVG(team, 36) : ''}<div class="tx"><div class="k">${k}</div><div class="p">${nm}</div>${s ? `<div class="s">${s}</div>` : ''}</div></div></div>`;
 }
 function momHTML(vals, per, goals, cols, live) {
   const sm = vals.map((v, i) => { const a = vals[i - 1] ?? v, b = vals[i + 1] ?? v; return (a + 2 * v + b) / 4; });
@@ -2753,7 +2878,7 @@ SCREENS.match = {
       $('#clk').classList.toggle('off', M.phase !== 'play');
       const tot = M.knockout && M.period >= 3 ? 120 : 90;
       $('#tl').style.width = Math.min(100, (Math.min(M.minute, tot) / tot) * 100) + '%';
-      [0, 1].forEach(k => { const b = $('#bc' + k), bo = M.teams[k].boost; if (!b) return; b.hidden = !bo; if (bo) b.innerHTML = `${IC.bolt.replace('<svg', '<svg width="13" height="13"')} Arenga ${Math.max(0, bo.end - M.minute)}'`; });
+      [0, 1].forEach(k => { const b = $('#bc' + k), bo = M.teams[k].tac || M.teams[k].boost; if (!b) return; b.hidden = !bo; if (bo) b.innerHTML = `${IC.bolt.replace('<svg', '<svg width="13" height="13"')} ${Math.max(0, bo.end - M.minute)}' · ${bo.name ? esc(bo.name) : 'Arenga'}`; });
       if (M.shootout) {
         const so = M.shootout; const b = $('#so'); b.hidden = false;
         const dots = k => { const arr = so.kicks[k].map(x => `<i class="${x ? 'y' : 'n'}"></i>`); while (arr.length < 5) arr.push('<i></i>'); return arr.join(''); };
@@ -2769,6 +2894,7 @@ SCREENS.match = {
         feed.insertAdjacentHTML('afterbegin', evHTML(e, info, LIVE.T, LIVE.cols));
         if (e.type === 'goal' || e.type === 'penGoal') celebrate(e, M);
         if (e.type === 'boost') boostFlash(e, M);
+        if (e.type === 'tactic') tacticFlash(e, M);
       }
       if (M.phase === 'play' && evs.length !== undefined) {
         // columna de momentum nueva
@@ -2784,7 +2910,7 @@ SCREENS.match = {
       }
       upd();
       if (M.done) { finishLive(p); return; }
-      const pause = evs.some(e => ['ht', 'ft90', 'etHt', 'pensStart', 'boost'].includes(e.type));
+      const pause = evs.some(e => ['ht', 'ft90', 'etHt', 'pensStart', 'boost', 'tactic'].includes(e.type));
       const d = (M.phase === 'pens' ? 1500 : pause ? 3000 : 1000) / LIVE.speed;
       LIVE.timer = setTimeout(tick, d);
     }
@@ -2792,6 +2918,14 @@ SCREENS.match = {
     if (M.done) { upd(); finishLive(p, true); } else loop();
   },
 };
+function tacticText(e) { const f = (l, v) => v ? `${l} ${v > 0 ? '+' : '−'}${Math.abs(v)}%` : ''; return [f('Ataque', e.att), f('Medio', e.mid), f('Defensa', e.def)].filter(Boolean).join(' · ') || 'Sin efecto'; }
+function tacticFlash(e, M) {
+  const T = LIVE.T[e.team];
+  const d = document.createElement('div'); d.className = 'goalflash boostflash';
+  d.innerHTML = `<div class="bf">${crestSVG(T, 96)}<b>¡SÚPER TÁCTICA!</b><q>${esc(e.name)}</q><small>${esc(T.name)}${TACTICS[e.tid] ? ' · ' + esc(TACTICS[e.tid].short) : ''}</small></div>`;
+  document.body.appendChild(d); setTimeout(() => d.remove(), 2600);
+  if (DATA.settings.vibrate) { try { navigator.vibrate && navigator.vibrate([60, 40, 60]); } catch (x) { } }
+}
 function boostFlash(e, M) {
   const p = M.players[e.pid]; const T = LIVE.T[e.team];
   const d = document.createElement('div'); d.className = 'goalflash boostflash';
@@ -2837,8 +2971,9 @@ SCREENS.summary = {
     if (p.tab === 'st') {
       const S = r.stats;
       const rows = [['Posesión', 'poss', '%'], ['Tiros totales', 'shots'], ['Tiros a puerta', 'sot'], ['Atajadas', 'saves'], ['Córners', 'corners'], ['Faltas', 'fouls'], ['Tarjetas amarillas', 'yc'], ['Tarjetas rojas', 'rc']];
+      if ((S[0].offsides || 0) + (S[1].offsides || 0) > 0) rows.splice(5, 0, ['Fueras de juego', 'offsides']);
       body = `<div class="card list">${rows.map(([l, k, u]) => {
-        const a = S[0][k], b = S[1][k], m = Math.max(a, b, 1);
+        const a = S[0][k] || 0, b = S[1][k] || 0, m = Math.max(a, b, 1);
         return `<div class="stat"><span class="v num">${a}${u || ''}</span><div class="c"><span>${l}</span><div class="bb"><div class="l"><i style="width:${a / m * 100}%;background:${a >= b ? cols[0] : 'var(--faint)'}"></i></div><div class="rr"><i style="width:${b / m * 100}%;background:${b >= a ? cols[1] : 'var(--faint)'}"></i></div></div></div><span class="v r num">${b}${u || ''}</span></div>`;
       }).join('')}</div>`;
     } else if (p.tab === 'rt') {
